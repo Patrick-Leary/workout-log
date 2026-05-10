@@ -1,40 +1,164 @@
-# Lift Log
+# 🏋️ Lift Log
 
-A lightweight workout tracker. Logs to your browser + syncs to Google Sheets.
+A lightweight, mobile-friendly workout tracker that runs entirely in your browser — no account, no backend, no app store required. Built as a static site hosted on GitHub Pages.
 
-## File Structure
+**Live app:** [https://patrick-leary.github.io/workout-log](https://patrick-leary.github.io/workout-log)
+
+> Anyone can use the live app directly — just open the link and start logging. Your data stays on your own device.
+
+***
+
+## Features
+
+- **Log workouts** — track sets, reps, and weight for 6 exercises (Leg Press, Chest Press, Pull-Ups, Overhead Press, Dumbbell Rows, Bicep Curls)
+- **Last session reference** — automatically shows your best weight/reps from the previous session as a guide
+- **History** — browse every past workout with a collapsible set-by-set breakdown
+- **Progress tracking** — all-time personal bests, session count, and streak counter per exercise
+- **Google Sheets sync** *(optional)* — automatically push every saved workout to a Google Sheet via Apps Script
+- **Export / Import JSON** — back up your data or move it between devices
+- **Light & dark mode** — respects your system preference with a manual toggle
+- **Works offline** — no internet required after the first load
+
+***
+
+## Using the App
+
+Open the live link above on any device. No sign-in needed.
+
+- **Log tab** — select a date, fill in your sets, and hit Save Workout
+- **History tab** — tap "View" on any session to see the full breakdown
+- **Progress tab** — see your personal bests and workout streak
+- **Settings tab** — configure Google Sheets sync, export/import data
+
+Your workout history is stored in your browser's `localStorage`. It persists between sessions on the same device and browser, but is not shared across devices automatically. Use **Export/Import JSON** to move data between devices, or set up Google Sheets sync to have a cloud backup.
+
+***
+
+## Google Sheets Sync (Optional)
+
+Connect the app to a Google Sheet so every saved workout is automatically logged as rows of data.
+
+### 1. Create the Sheet
+
+1. Go to [sheets.google.com](https://sheets.google.com) and create a new spreadsheet
+2. Rename the first tab to **Workouts** (exact spelling)
+3. Add these headers in row 1:
+
+| A | B | C | D | E | F |
+|---|---|---|---|---|---|
+| Date | Exercise | Set | Weight (lbs) | Reps | Done |
+
+### 2. Create the Apps Script
+
+1. In your Sheet, click **Extensions → Apps Script**
+2. Delete all default code and paste the following:
+
+```javascript
+function doPost(e) {
+  try {
+    const data = JSON.parse(e.postData.contents);
+
+    if (data._test) {
+      return ContentService
+        .createTextContent(JSON.stringify({ status: "ok", message: "Test successful" }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Workouts");
+
+    data.exercises.forEach(exercise => {
+      exercise.sets.forEach((set, i) => {
+        sheet.appendRow([
+          data.date,
+          exercise.name,
+          i + 1,
+          set.weight ?? "",
+          set.reps ?? "",
+          set.done ? "Yes" : "No"
+        ]);
+      });
+    });
+
+    return ContentService
+      .createTextContent(JSON.stringify({ status: "ok" }))
+      .setMimeType(ContentService.MimeType.JSON);
+
+  } catch (err) {
+    return ContentService
+      .createTextContent(JSON.stringify({ status: "error", message: err.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+```
+
+3. Click **Save** and give the project any name (e.g. "Lift Log Sync")
+
+### 3. Deploy as a Web App
+
+1. Click **Deploy → New deployment**
+2. Click the ⚙️ gear icon next to "Type" and select **Web app**
+3. Configure:
+   - **Execute as:** Me
+   - **Who has access:** Anyone
+4. Click **Deploy** and authorize when prompted
+5. Copy the deployment URL — it looks like:
+   `https://script.google.com/macros/s/AKfycbx.../exec`
+
+### 4. Connect in the App
+
+1. Open the app and go to the **Settings** tab
+2. Paste the URL into the **Deployment URL** field
+3. Click **Save**, then **Test connection**
+4. You should see "Connection successful ✓"
+
+> **Note:** Every time you edit the Apps Script, create a **new deployment** for changes to take effect. Update the URL in Settings if it changes.
+
+***
+
+## Running Your Own Copy
+
+If you want your own hosted version at your own URL:
+
+### Option A — Fork on GitHub (recommended)
+
+1. Click **Fork** at the top right of this repository
+2. Go to your fork's **Settings → Pages**
+3. Under **Source**, select **Deploy from a branch → main**
+4. Your app will be live at `https://YOUR-USERNAME.github.io/workout-log`
+5. Set up your own Google Sheet and Apps Script following the steps above
+
+### Option B — Download and host yourself
+
+1. Click **Code → Download ZIP** and extract it
+2. Host on any static service — GitHub Pages, Netlify, Vercel, Cloudflare Pages (all free)
+3. No build step required — plain HTML, CSS, and JS
+
+***
+
+## Project Structure
 
 ```
-lift-log/
-├── index.html       ← App markup
-├── style.css        ← All styles and design tokens
-├── app.js           ← All application logic
-├── appsscript.js    ← Paste this into Google Apps Script (see below)
-└── README.md
+workout-log/
+├── index.html          # App shell and markup
+├── styles/
+│   └── style.css       # All styles and design tokens
+└── scripts/
+    └── app.js          # All application logic
 ```
 
-## Local Development
+No frameworks, no build tools, no dependencies. Runs directly in the browser.
 
-Open `index.html` directly in your browser — no build step needed.
-Or use VS Code's Live Server extension for auto-reload.
+***
 
-## Deploy to GitHub Pages
+## Tech Stack
 
-1. Push this folder to a GitHub repo
-2. Settings → Pages → Source: main branch / root
-3. Your app will be live at `https://yourusername.github.io/repo-name`
+- **HTML / CSS / JS** — no frameworks
+- **localStorage** — client-side data persistence
+- **Google Apps Script** — optional Sheets sync endpoint
+- **GitHub Pages** — free static hosting
 
-## Google Sheets Sync Setup
+***
 
-See the full instructions at the top of `appsscript.js`.
-Short version:
-1. Create a Google Sheet, copy its ID
-2. Paste `appsscript.js` into script.google.com, fill in your Sheet ID
-3. Deploy as a Web App (Anyone can access)
-4. Paste the deployment URL into Settings inside the app
+## License
 
-## Data Storage
-
-- **Local:** `localStorage` under keys `ll_workouts`, `ll_queue`, `ll_sheets_url`
-- **Remote:** Google Sheets (one tab per exercise, one row per set)
-- **Export:** Settings → Export JSON (backup anytime)
+MIT — fork it, modify it, use it however you like.
