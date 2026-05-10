@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lift Log</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300..700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles/style.css" />
+</head>
+<body>
+<div class="app">
+
+  <!-- TOP BAR -->
+  <header class="topbar">
+    <div class="logo">
+      <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-label="Lift Log logo">
+        <rect x="3"  y="10" width="4" height="8" rx="1.5" fill="currentColor" opacity=".5"/>
+        <rect x="21" y="10" width="4" height="8" rx="1.5" fill="currentColor" opacity=".5"/>
+        <rect x="8"  y="6"  width="4" height="16" rx="2"  fill="currentColor" opacity=".8"/>
+        <rect x="16" y="6"  width="4" height="16" rx="2"  fill="currentColor" opacity=".8"/>
+        <rect x="11" y="11" width="6" height="6"  rx="1.5" fill="currentColor"/>
+      </svg>
+      <span class="logo-text">Lift Log</span>
+    </div>
+    <div class="topbar-right">
+      <div class="sync-status" id="sync-status" aria-live="polite"></div>
+      <button class="icon-btn" data-theme-toggle aria-label="Toggle theme">
+        <!-- filled by JS -->
+      </button>
+    </div>
+  </header>
+
+  <!-- MAIN -->
+  <main class="main">
+
+    <!-- TABS -->
+    <div class="tabs" role="tablist" aria-label="App sections">
+      <button class="tab active" role="tab" id="tab-log"      onclick="switchTab('log')">Log</button>
+      <button class="tab"        role="tab" id="tab-history"  onclick="switchTab('history')">History</button>
+      <button class="tab"        role="tab" id="tab-progress" onclick="switchTab('progress')">Progress</button>
+      <button class="tab"        role="tab" id="tab-settings" onclick="switchTab('settings')">Settings</button>
+    </div>
+
+    <!-- LOG -->
+    <section class="tab-panel active" id="panel-log" aria-labelledby="tab-log">
+      <div class="date-row">
+        <h2 class="section-heading">Today's Workout</h2>
+        <div class="date-right">
+          <label class="date-label" for="workout-date">Date</label>
+          <input class="date-input" type="date" id="workout-date" />
+        </div>
+      </div>
+      <div id="exercises-container"></div>
+      <div class="save-row">
+        <button class="btn btn-ghost" onclick="clearForm()">Reset</button>
+        <button class="btn btn-primary" id="save-btn" onclick="saveWorkout()">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+            <polyline points="17 21 17 13 7 13 7 21"/>
+            <polyline points="7 3 7 8 15 8"/>
+          </svg>
+          Save Workout
+        </button>
+      </div>
+    </section>
+
+    <!-- HISTORY -->
+    <section class="tab-panel" id="panel-history" aria-labelledby="tab-history">
+      <div class="panel-header">
+        <h2 class="section-heading">Past Workouts</h2>
+        <button class="btn btn-ghost btn-sm" onclick="clearAllHistory()">Clear all</button>
+      </div>
+      <div class="history-list" id="history-list"></div>
+    </section>
+
+    <!-- PROGRESS -->
+    <section class="tab-panel" id="panel-progress" aria-labelledby="tab-progress">
+      <div class="panel-header">
+        <h2 class="section-heading">Progress</h2>
+        <div id="streak-area"></div>
+      </div>
+      <div class="progress-grid" id="progress-grid"></div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section class="tab-panel" id="panel-settings" aria-labelledby="tab-settings">
+      <h2 class="section-heading">Settings</h2>
+
+      <div class="settings-group">
+        <div class="settings-group-title">Google Sheets Sync</div>
+        <p class="settings-desc">
+          Paste your Apps Script deployment URL to automatically sync every saved workout to a Google Sheet.
+          See <code>appsscript.js</code> in this project for setup instructions.
+        </p>
+        <div class="field-row">
+          <label class="field-label" for="sheets-url">Deployment URL</label>
+          <input class="text-input" type="url" id="sheets-url"
+            placeholder="https://script.google.com/macros/s/…/exec" />
+        </div>
+        <div class="field-row">
+          <button class="btn btn-primary" onclick="saveSettings()">Save</button>
+          <button class="btn btn-ghost" onclick="testConnection()">Test connection</button>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-group-title">Data</div>
+        <p class="settings-desc">Export all local workout data as a JSON file for backup or migration.</p>
+        <div class="field-row">
+          <button class="btn btn-ghost" onclick="exportData()">Export JSON</button>
+          <button class="btn btn-ghost" onclick="importData()">Import JSON</button>
+          <input type="file" id="import-file" accept=".json" style="display:none" onchange="handleImport(this)" />
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-group-title">Queue</div>
+        <p class="settings-desc" id="queue-status">Checking queue…</p>
+        <div class="field-row">
+          <button class="btn btn-ghost" onclick="retryQueue()">Retry failed syncs</button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<!-- CONFIRM MODAL -->
+<div class="modal-backdrop" id="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+  <div class="modal">
+    <div class="modal-title" id="modal-title"></div>
+    <div class="modal-body"><p id="modal-body-text"></p></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="modal-confirm-btn">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<script src="scripts/app.js"></script>
+</body>
+</html>
