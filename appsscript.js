@@ -71,6 +71,19 @@ function doPost(e) {
     const sheet   = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Workouts");
     const lastRow = sheet.getLastRow();
 
+    // Delete workout — remove all rows for this date and return
+    if (data._delete) {
+      if (lastRow > 1) {
+        const dateCol = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+        for (let i = dateCol.length - 1; i >= 0; i--) {
+          if (formatDateCell(dateCol[i][0]) === String(data.date)) {
+            sheet.deleteRow(i + 2);
+          }
+        }
+      }
+      return respond({ status: "ok" });
+    }
+
     // Delete all existing rows for this date so we don't accumulate duplicates
     if (lastRow > 1) {
       const dateCol = sheet.getRange(2, 1, lastRow - 1, 1).getValues();

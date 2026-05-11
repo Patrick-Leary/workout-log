@@ -269,8 +269,24 @@ async function saveWorkout() {
   if (!date) { showToast("Please select a date"); return; }
 
   const exercises = collectFormData();
-  const anyData   = exercises.some(ex => ex.sets.some(s => s.reps != null));
-  if (!anyData)   { showToast("Enter at least one rep before saving"); return; }
+
+  if (!exercises.length) {
+    showToast("Add at least one exercise before saving"); return;
+  }
+  for (const ex of exercises) {
+    const exDef = EXERCISES.find(e => e.id === ex.id);
+    if (!ex.sets.length) {
+      showToast(`${ex.name} has no sets — add sets or remove it`); return;
+    }
+    for (const set of ex.sets) {
+      if (set.reps == null) {
+        showToast(`Enter reps for all sets — ${ex.name}`); return;
+      }
+      if (exDef?.weighted && set.weight == null) {
+        showToast(`Enter weight for all sets — ${ex.name}`); return;
+      }
+    }
+  }
 
   const entry = { date, exercises, savedAt: new Date().toISOString() };
 
@@ -326,6 +342,20 @@ async function fetchFromSheets() {
   } catch (err) {
     console.error("Failed to fetch from Sheets:", err);
     setSyncStatus("error", "Fetch failed — using local data");
+  }
+}
+
+async function deleteFromSheets(date) {
+  if (!sheetsUrl) return;
+  try {
+    const res = await fetch(sheetsUrl, {
+      method:  "POST",
+      headers: { "Content-Type": "text/plain" },
+      body:    JSON.stringify({ _delete: true, date }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  } catch (err) {
+    console.error("Failed to delete from Sheets:", err);
   }
 }
 
@@ -446,10 +476,12 @@ function deleteWorkout(idx) {
     "Delete workout?",
     `Remove the workout from ${formatDate(workouts[idx].date)}? This cannot be undone.`,
     () => {
+      const date = workouts[idx].date;
       workouts.splice(idx, 1);
       persist();
       renderHistory();
       showToast("Workout deleted");
+      deleteFromSheets(date);
     },
     "Delete"
   );
