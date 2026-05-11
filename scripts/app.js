@@ -519,20 +519,23 @@ function clearAllHistory() {
 
 // ── PROGRESS ──────────────────────────────────────────────────────────────
 
+// Returns the number of calendar days between two ISO date strings (a → b)
+function daysBetween(isoA, isoB) {
+  const [y1, m1, d1] = isoA.split("-").map(Number);
+  const [y2, m2, d2] = isoB.split("-").map(Number);
+  return Math.round((new Date(y2, m2 - 1, d2) - new Date(y1, m1 - 1, d1)) / 86400000);
+}
+
+// Each workout session adds 1. Resets only if 7+ days pass with no workout.
 function calcStreak() {
   const days = workouts.map(w => w.date).sort((a, b) => b.localeCompare(a));
-  let streak = 0;
-  if (days.length) {
-    let check = todayISO();
-    if (days[0] < check) check = days[0];
-    for (const day of days) {
-      if (day === check) {
-        streak++;
-        const [y, m, d] = check.split("-").map(Number);
-        const prev = new Date(y, m - 1, d - 1);
-        check = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}-${String(prev.getDate()).padStart(2, "0")}`;
-      } else if (day < check) break;
-    }
+  if (!days.length) return 0;
+  if (daysBetween(days[0], todayISO()) >= 7) return 0;
+
+  let streak = 1;
+  for (let i = 0; i < days.length - 1; i++) {
+    if (daysBetween(days[i + 1], days[i]) >= 7) break;
+    streak++;
   }
   return streak;
 }
@@ -583,14 +586,16 @@ function renderProgress() {
       return (s.reps ?? 0) >= (best.reps ?? 0) ? s : best;
     }, sessionBests[0]);
 
-    const prevBest = sessionBests.length > 1 ? sessionBests[sessionBests.length - 2] : null;
-    let deltaHtml  = "";
-    if (prevBest && ex.weighted && allTimeBest.weight && prevBest.weight) {
-      const d = allTimeBest.weight - prevBest.weight;
+    const lastSession = sessionBests[sessionBests.length - 1];
+    const prevSession = sessionBests.length > 1 ? sessionBests[sessionBests.length - 2] : null;
+    const bestReps    = sessionBests.reduce((max, s) => Math.max(max, s.reps ?? 0), 0);
+
+    let deltaHtml = "";
+    if (prevSession && ex.weighted && lastSession.weight && prevSession.weight) {
+      const d = lastSession.weight - prevSession.weight;
       if (d > 0) deltaHtml = `<span class="pb-delta">+${d}lb</span>`;
     }
 
-    const lastLogged = sessionBests[sessionBests.length - 1];
     const card = document.createElement("div");
     card.className = "card progress-card";
     card.innerHTML = `
@@ -604,7 +609,7 @@ function renderProgress() {
         </div>` : ""}
       <div class="pb-row">
         <span class="pb-label">Best reps</span>
-        <span class="pb-value">${allTimeBest.reps ?? "–"}</span>
+        <span class="pb-value">${bestReps || "–"}</span>
       </div>
       <div class="pb-row">
         <span class="pb-label">Sessions logged</span>
@@ -612,7 +617,7 @@ function renderProgress() {
       </div>
       <div class="pb-row">
         <span class="pb-label">Last worked</span>
-        <span class="pb-value" style="font-family:var(--font-body);font-size:var(--text-xs)">${formatDate(lastLogged.date)}</span>
+        <span class="pb-value" style="font-family:var(--font-body);font-size:var(--text-xs)">${formatDate(lastSession.date)}</span>
       </div>`;
     grid.appendChild(card);
   });
