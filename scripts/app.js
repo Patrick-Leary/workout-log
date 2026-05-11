@@ -113,7 +113,7 @@ function formatDate(iso) {
 // ── LAST BEST ─────────────────────────────────────────────────────────────
 
 function getLastBest(exerciseId) {
-  for (let i = workouts.length - 1; i >= 0; i--) {
+  for (let i = 0; i < workouts.length; i++) {
     const ex = workouts[i].exercises.find(e => e.id === exerciseId);
     if (!ex) continue;
     const done = ex.sets.filter(s => s.reps != null);
@@ -539,6 +539,7 @@ async function saveWeight() {
   weightLog.sort((a, b) => a.date.localeCompare(b.date));
   persist();
   renderWeightTab();
+  document.getElementById("weight-input").value = "";
   showToast("Weight logged ✓");
   syncWeightToSheets(entry);
 }
@@ -744,15 +745,18 @@ function renderWeightChart() {
   const ticks    = [];
   for (let t = Math.ceil(yMin / tickStep) * tickStep; t <= yMax; t += tickStep) ticks.push(t);
 
-  // X-axis labels — first week of each calendar month
+  // X-axis labels — use Wednesday of each week so month-boundary weeks
+  // (e.g. Mon Mar 30 – Sun Apr 5) get labelled by the month that owns
+  // the majority of the week rather than the Monday's month.
   const xLabels = [];
   let lastMonth = -1;
   weeks.forEach((w, i) => {
-    const mo = parseInt(w.weekStart.split("-")[1]);
+    const [wy, wm, wd] = w.weekStart.split("-").map(Number);
+    const wednesday = new Date(wy, wm - 1, wd + 3);
+    const mo = wednesday.getMonth(); // 0-indexed is fine for comparison
     if (mo !== lastMonth) {
       lastMonth = mo;
-      const dt  = new Date(w.weekStart + "T12:00:00");
-      xLabels.push({ x: xScale(i), label: dt.toLocaleDateString("en-US", { month: "short" }) });
+      xLabels.push({ x: xScale(i), label: wednesday.toLocaleDateString("en-US", { month: "short" }) });
     }
   });
 
@@ -937,7 +941,7 @@ function updateQueueStatus() {
 
 function exportData() {
   const blob = new Blob(
-    [JSON.stringify({ workouts, exportedAt: new Date().toISOString() }, null, 2)],
+    [JSON.stringify({ workouts, weightLog, exportedAt: new Date().toISOString() }, null, 2)],
     { type: "application/json" }
   );
   const a    = document.createElement("a");
@@ -958,23 +962,36 @@ function handleImport(input) {
   reader.onload = (e) => {
     try {
       const parsed   = JSON.parse(e.target.result);
-      const imported = parsed.workouts ?? parsed;
-      if (!Array.isArray(imported)) throw new Error("Invalid format");
+      const importedWorkouts = parsed.workouts ?? (Array.isArray(parsed) ? parsed : null);
+      const importedWeight   = Array.isArray(parsed.weightLog) ? parsed.weightLog : [];
+      if (!importedWorkouts) throw new Error("Invalid format");
+      const totalItems = importedWorkouts.length + importedWeight.length;
       showConfirm(
-        "Import workouts?",
-        `This will merge ${imported.length} workout(s) into your existing data.`,
+        "Import data?",
+        `This will merge ${importedWorkouts.length} workout(s) and ${importedWeight.length} weight entry(ies) into your existing data.`,
         () => {
-          const newEntries = [];
-          imported.forEach(entry => {
+          const newWorkouts = [];
+          importedWorkouts.forEach(entry => {
             if (!workouts.find(w => w.date === entry.date)) {
               workouts.push(entry);
-              newEntries.push(entry);
+              newWorkouts.push(entry);
             }
           });
           workouts.sort((a, b) => b.date.localeCompare(a.date));
+
+          const newWeightEntries = [];
+          importedWeight.forEach(entry => {
+            if (!weightLog.find(e => e.date === entry.date)) {
+              weightLog.push(entry);
+              newWeightEntries.push(entry);
+            }
+          });
+          weightLog.sort((a, b) => a.date.localeCompare(b.date));
+
           persist();
-          showToast(`Imported ${imported.length} workout(s)`);
-          newEntries.forEach(entry => syncToSheets(entry));
+          showToast(`Imported ${totalItems} item(s)`);
+          newWorkouts.forEach(entry => syncToSheets(entry));
+          newWeightEntries.forEach(entry => syncWeightToSheets(entry));
         },
         "Import"
       );
