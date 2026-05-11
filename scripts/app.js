@@ -24,6 +24,9 @@ let addedExercises = [];
 let pickerOpen     = false;
 let weightLog      = [];
 let weightLookback = null; // null = all time
+let logDrafts      = {};   // { [dateISO]: exercises[] }
+let currentLogDate = "";
+let isLoadingForm  = false;
 
 // ── PERSISTENCE ───────────────────────────────────────────────────────────
 
@@ -33,6 +36,7 @@ function loadFromStorage() {
     syncQueue  = JSON.parse(localStorage.getItem("ll_queue")      || "[]");
     sheetsUrl  = localStorage.getItem("ll_sheets_url")            || "";
     weightLog  = JSON.parse(localStorage.getItem("ll_weight")     || "[]");
+    logDrafts  = JSON.parse(localStorage.getItem("ll_drafts")     || "{}");
   } catch (e) {
     console.warn("Could not read localStorage:", e);
   }
@@ -47,6 +51,62 @@ function persist() {
   } catch (e) {
     console.warn("Could not write localStorage:", e);
   }
+}
+
+// ── DRAFT ─────────────────────────────────────────────────────────────────
+
+function saveDraft(date) {
+  if (!date || isLoadingForm) return;
+  const exercises = collectFormData();
+  if (!exercises.length) {
+    delete logDrafts[date];
+  } else {
+    logDrafts[date] = exercises;
+  }
+  try { localStorage.setItem("ll_drafts", JSON.stringify(logDrafts)); } catch (e) {}
+}
+
+function clearDraft(date) {
+  delete logDrafts[date];
+  try { localStorage.setItem("ll_drafts", JSON.stringify(logDrafts)); } catch (e) {}
+}
+
+// Remove drafts older than yesterday — runs once on load
+function pruneDrafts() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  const yesterday = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  let pruned = false;
+  Object.keys(logDrafts).forEach(date => {
+    if (date < yesterday) { delete logDrafts[date]; pruned = true; }
+  });
+  if (pruned) try { localStorage.setItem("ll_drafts", JSON.stringify(logDrafts)); } catch (e) {}
+}
+
+// Populate the log form from draft → committed workout → empty
+function loadDraftOrWorkout(date) {
+  const source = logDrafts[date]
+    ?? workouts.find(w => w.date === date)?.exercises
+    ?? null;
+  isLoadingForm = true;
+  initLogPanel();
+  if (source) source.forEach(ex => addExerciseToLog(ex.id, ex.sets));
+  isLoadingForm = false;
+  updateSaveButton(date);
+}
+
+function updateSaveButton(date) {
+  const btn = document.getElementById("save-btn");
+  if (!btn) return;
+  const label = workouts.some(w => w.date === date) ? "Update Workout" : "Save Workout";
+  btn.innerHTML = `
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="2.5" aria-hidden="true">
+      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+      <polyline points="17 21 17 13 7 13 7 21"/>
+      <polyline points="7 3 7 8 15 8"/>
+    </svg>
+    ${label}`;
 }
 
 // ── THEME ─────────────────────────────────────────────────────────────────
@@ -156,7 +216,7 @@ function toggleExercisePicker(e) {
   document.getElementById("exercise-picker")?.classList.toggle("open", pickerOpen);
 }
 
-function addExerciseToLog(exId) {
+function addExerciseToLog(exId, prefilledSets = null) {
   if (addedExercises.includes(exId)) return;
   addedExercises.push(exId);
   pickerOpen = false;
@@ -199,8 +259,13 @@ function addExerciseToLog(exId) {
     </div>`;
 
   container.appendChild(block);
-  for (let i = 0; i < ex.defaultSets; i++) addSet(ex.id, "", "", false);
+  if (prefilledSets?.length) {
+    prefilledSets.forEach(s => addSet(ex.id, s.weight ?? "", s.reps ?? "", false));
+  } else {
+    for (let i = 0; i < ex.defaultSets; i++) addSet(ex.id, "", "", false);
+  }
   updateAddExerciseBtn();
+  if (!isLoadingForm) saveDraft(currentLogDate);
 }
 
 function removeExercise(exId) {
@@ -208,6 +273,7 @@ function removeExercise(exId) {
   addedExercises = addedExercises.filter(id => id !== exId);
   delete setCounters[exId];
   updateAddExerciseBtn();
+  saveDraft(currentLogDate);
 }
 
 function addSet(exId, weight = "", reps = "", animate = true) {
@@ -244,6 +310,7 @@ function removeSet(btn, exId) {
   document.getElementById(`sets-${exId}`)
     .querySelectorAll("tr")
     .forEach((row, i) => { row.querySelector(".set-num").textContent = i + 1; });
+  saveDraft(currentLogDate);
 }
 
 // ── COLLECT FORM DATA ─────────────────────────────────────────────────────
@@ -304,6 +371,8 @@ async function saveWorkout() {
         workouts[existingIdx] = entry;
         workouts.sort((a, b) => b.date.localeCompare(a.date));
         persist();
+        clearDraft(date);
+        updateSaveButton(date);
         showSaveConfirmation();
         await syncToSheets(entry);
       },
@@ -315,13 +384,25 @@ async function saveWorkout() {
   workouts.push(entry);
   workouts.sort((a, b) => b.date.localeCompare(a.date));
   persist();
+  clearDraft(date);
+  updateSaveButton(date);
   showSaveConfirmation();
   await syncToSheets(entry);
 }
 
 function clearForm() {
-  initLogPanel();
-  document.getElementById("workout-date").value = todayISO();
+  showConfirm(
+    "Reset form?",
+    "This will clear all exercises and sets. This cannot be undone.",
+    () => {
+      clearDraft(currentLogDate);
+      initLogPanel();
+      currentLogDate = todayISO();
+      document.getElementById("workout-date").value = currentLogDate;
+      updateSaveButton(currentLogDate);
+    },
+    "Reset"
+  );
 }
 
 // ── GOOGLE SHEETS SYNC ────────────────────────────────────────────────────
@@ -1082,11 +1163,26 @@ document.addEventListener("click", e => {
 
 loadFromStorage();
 initTheme();
-document.getElementById("workout-date").value = todayISO();
-document.getElementById("weight-date").value   = todayISO();
-initLogPanel();
+pruneDrafts();
+
+currentLogDate = todayISO();
+document.getElementById("workout-date").value = currentLogDate;
+document.getElementById("weight-date").value   = currentLogDate;
+loadDraftOrWorkout(currentLogDate);
 
 updateQueueStatus();
+
+// Save draft when any weight/reps input changes
+document.getElementById("exercises-container").addEventListener("input", () => {
+  saveDraft(currentLogDate);
+});
+
+// On date change: save draft for the departing date, load for the new one
+document.getElementById("workout-date").addEventListener("change", e => {
+  saveDraft(currentLogDate);
+  currentLogDate = e.target.value;
+  loadDraftOrWorkout(currentLogDate);
+});
 
 // Fetch latest data from Sheets in the background — app is usable immediately
 // from localStorage cache while the request completes.
