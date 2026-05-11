@@ -48,7 +48,7 @@ function persist() {
 function initTheme() {
   const btn  = document.querySelector("[data-theme-toggle]");
   const root = document.documentElement;
-  let theme  = root.getAttribute("data-theme") ||
+  let theme  = localStorage.getItem("ll_theme") ||
                (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
 
   root.setAttribute("data-theme", theme);
@@ -57,6 +57,7 @@ function initTheme() {
   btn?.addEventListener("click", () => {
     theme = theme === "dark" ? "light" : "dark";
     root.setAttribute("data-theme", theme);
+    localStorage.setItem("ll_theme", theme);
     updateThemeIcon(btn, theme);
   });
 }
@@ -91,7 +92,8 @@ function switchTab(name) {
 // ── DATE HELPERS ──────────────────────────────────────────────────────────
 
 function todayISO() {
-  return new Date().toISOString().split("T")[0];
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function formatDate(iso) {
@@ -374,14 +376,14 @@ function renderHistory() {
         ${w.exercises.map(ex => `
           <div class="detail-exercise">
             <div class="detail-exercise-name">${ex.name}</div>
-            <div class="detail-grid header">
+            <div class="detail-set-row detail-set-header">
               <span>#</span>
               <span>${ex.sets.some(s => s.weight) ? "Weight" : ""}</span>
               <span>Reps</span>
               <span>Done</span>
             </div>
             ${ex.sets.map((s, i) => `
-              <div class="detail-grid">
+              <div class="detail-set-row">
                 <span>${i + 1}</span>
                 <span>${s.weight != null ? s.weight + "lb" : "—"}</span>
                 <span>${s.reps ?? "—"}</span>
@@ -439,13 +441,15 @@ function renderProgress() {
   const days  = workouts.map(w => w.date).sort((a, b) => b.localeCompare(a));
   let streak  = 0;
   if (days.length) {
+    // Allow streak to start from today or yesterday so it isn't broken just because you haven't logged yet today
     let check = todayISO();
+    if (days[0] < check) check = days[0];
     for (const day of days) {
       if (day === check) {
         streak++;
-        const d = new Date(check);
-        d.setDate(d.getDate() - 1);
-        check = d.toISOString().split("T")[0];
+        const [y, m, d] = check.split("-").map(Number);
+        const prev = new Date(y, m - 1, d - 1);
+        check = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}-${String(prev.getDate()).padStart(2, "0")}`;
       } else if (day < check) break;
     }
   }
