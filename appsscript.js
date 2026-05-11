@@ -71,6 +71,13 @@ function doPost(e) {
     const sheet   = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Workouts");
     const lastRow = sheet.getLastRow();
 
+    // Delete all workouts — wipe every row below the header
+    if (data._deleteAll) {
+      const lastRow = sheet.getLastRow();
+      if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
+      return respond({ status: "ok" });
+    }
+
     // Delete workout — remove all rows for this date and return
     if (data._delete) {
       if (lastRow > 1) {

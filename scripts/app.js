@@ -299,7 +299,7 @@ async function saveWorkout() {
         workouts[existingIdx] = entry;
         workouts.sort((a, b) => b.date.localeCompare(a.date));
         persist();
-        showToast("Workout updated ✓");
+        showSaveConfirmation();
         await syncToSheets(entry);
       },
       "Replace"
@@ -310,7 +310,7 @@ async function saveWorkout() {
   workouts.push(entry);
   workouts.sort((a, b) => b.date.localeCompare(a.date));
   persist();
-  showToast("Workout saved ✓");
+  showSaveConfirmation();
   await syncToSheets(entry);
 }
 
@@ -342,6 +342,20 @@ async function fetchFromSheets() {
   } catch (err) {
     console.error("Failed to fetch from Sheets:", err);
     setSyncStatus("error", "Fetch failed — using local data");
+  }
+}
+
+async function clearSheetsHistory() {
+  if (!sheetsUrl) return;
+  try {
+    const res = await fetch(sheetsUrl, {
+      method:  "POST",
+      headers: { "Content-Type": "text/plain" },
+      body:    JSON.stringify({ _deleteAll: true }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  } catch (err) {
+    console.error("Failed to clear Sheets history:", err);
   }
 }
 
@@ -423,7 +437,7 @@ function renderHistory() {
 
   list.innerHTML = "";
   workouts.forEach((w, idx) => {
-    const doneSets = w.exercises.reduce((t, e) => t + e.sets.filter(s => s.reps != null).length, 0);
+    const totalSets = w.exercises.reduce((t, e) => t + e.sets.filter(s => s.reps != null).length, 0);
     const pills    = w.exercises
       .filter(e => e.sets.some(s => s.reps))
       .map(e => `<span class="history-pill">${e.name}</span>`)
@@ -436,7 +450,7 @@ function renderHistory() {
         <div>
           <div class="history-date">${formatDate(w.date)}</div>
           <div class="history-summary">${pills}</div>
-          <div class="history-meta">${doneSets} sets</div>
+          <div class="history-meta">${totalSets} sets</div>
         </div>
         <div class="history-actions">
           <button class="btn btn-ghost btn-sm" onclick="toggleDetail(${idx}, this)">View</button>
@@ -491,12 +505,13 @@ function clearAllHistory() {
   if (!workouts.length) { showToast("Nothing to clear"); return; }
   showConfirm(
     "Clear all history?",
-    "This will permanently delete all locally stored workouts.",
+    "This will permanently delete all workouts from the app and Google Sheets. This cannot be undone.",
     () => {
       workouts = [];
       persist();
       renderHistory();
       showToast("History cleared");
+      clearSheetsHistory();
     },
     "Clear all"
   );
@@ -504,15 +519,10 @@ function clearAllHistory() {
 
 // ── PROGRESS ──────────────────────────────────────────────────────────────
 
-function renderProgress() {
-  const grid       = document.getElementById("progress-grid");
-  const streakArea = document.getElementById("streak-area");
-  grid.innerHTML   = "";
-
-  const days  = workouts.map(w => w.date).sort((a, b) => b.localeCompare(a));
-  let streak  = 0;
+function calcStreak() {
+  const days = workouts.map(w => w.date).sort((a, b) => b.localeCompare(a));
+  let streak = 0;
   if (days.length) {
-    // Allow streak to start from today or yesterday so it isn't broken just because you haven't logged yet today
     let check = todayISO();
     if (days[0] < check) check = days[0];
     for (const day of days) {
@@ -524,6 +534,15 @@ function renderProgress() {
       } else if (day < check) break;
     }
   }
+  return streak;
+}
+
+function renderProgress() {
+  const grid       = document.getElementById("progress-grid");
+  const streakArea = document.getElementById("streak-area");
+  grid.innerHTML   = "";
+
+  const streak = calcStreak();
   streakArea.innerHTML = streak > 0
     ? `<div class="streak-badge">🔥 ${streak}-session streak</div>`
     : `<div class="streak-badge" style="background:var(--color-surface-offset);color:var(--color-text-muted)">No active streak — keep going!</div>`;
@@ -671,12 +690,17 @@ function handleImport(input) {
         "Import workouts?",
         `This will merge ${imported.length} workout(s) into your existing data.`,
         () => {
+          const newEntries = [];
           imported.forEach(entry => {
-            if (!workouts.find(w => w.date === entry.date)) workouts.push(entry);
+            if (!workouts.find(w => w.date === entry.date)) {
+              workouts.push(entry);
+              newEntries.push(entry);
+            }
           });
           workouts.sort((a, b) => b.date.localeCompare(a.date));
           persist();
           showToast(`Imported ${imported.length} workout(s)`);
+          newEntries.forEach(entry => syncToSheets(entry));
         },
         "Import"
       );
@@ -686,6 +710,23 @@ function handleImport(input) {
   };
   reader.readAsText(file);
   input.value = "";
+}
+
+// ── SAVE CONFIRMATION ─────────────────────────────────────────────────────
+
+let saveConfirmTimer;
+function showSaveConfirmation() {
+  const streak  = calcStreak();
+  const el      = document.getElementById("save-confirm");
+  const streakEl = document.getElementById("save-confirm-streak");
+
+  streakEl.textContent = streak > 1  ? `🔥 ${streak}-session streak`
+                       : streak === 1 ? "First session — keep it up!"
+                       : "";
+
+  el.classList.add("show");
+  clearTimeout(saveConfirmTimer);
+  saveConfirmTimer = setTimeout(() => el.classList.remove("show"), 4000);
 }
 
 // ── TOAST ─────────────────────────────────────────────────────────────────
@@ -715,6 +756,11 @@ function closeModal() {
   document.getElementById("confirm-modal").classList.remove("open");
   confirmCallback = null;
 }
+
+document.getElementById("save-confirm").addEventListener("click", () => {
+  document.getElementById("save-confirm").classList.remove("show");
+  clearTimeout(saveConfirmTimer);
+});
 
 document.getElementById("modal-confirm-btn").addEventListener("click", () => {
   if (confirmCallback) { confirmCallback(); closeModal(); }
