@@ -22,14 +22,17 @@ let sheetsUrl      = "";
 let setCounters    = {};
 let addedExercises = [];
 let pickerOpen     = false;
+let weightLog      = [];
+let weightLookback = null; // null = all time
 
 // ── PERSISTENCE ───────────────────────────────────────────────────────────
 
 function loadFromStorage() {
   try {
-    workouts  = JSON.parse(localStorage.getItem("ll_workouts")   || "[]");
-    syncQueue = JSON.parse(localStorage.getItem("ll_queue")      || "[]");
-    sheetsUrl = localStorage.getItem("ll_sheets_url")            || "";
+    workouts   = JSON.parse(localStorage.getItem("ll_workouts")   || "[]");
+    syncQueue  = JSON.parse(localStorage.getItem("ll_queue")      || "[]");
+    sheetsUrl  = localStorage.getItem("ll_sheets_url")            || "";
+    weightLog  = JSON.parse(localStorage.getItem("ll_weight")     || "[]");
   } catch (e) {
     console.warn("Could not read localStorage:", e);
   }
@@ -40,6 +43,7 @@ function persist() {
     localStorage.setItem("ll_workouts",   JSON.stringify(workouts));
     localStorage.setItem("ll_queue",      JSON.stringify(syncQueue));
     localStorage.setItem("ll_sheets_url", sheetsUrl);
+    localStorage.setItem("ll_weight",     JSON.stringify(weightLog));
   } catch (e) {
     console.warn("Could not write localStorage:", e);
   }
@@ -79,7 +83,7 @@ function updateThemeIcon(btn, theme) {
 
 // ── TABS ──────────────────────────────────────────────────────────────────
 
-const TAB_IDS = ["log", "history", "progress", "settings"];
+const TAB_IDS = ["log", "weight", "history", "progress", "settings"];
 
 function switchTab(name) {
   TAB_IDS.forEach(id => {
@@ -89,6 +93,7 @@ function switchTab(name) {
   if (name === "history")  renderHistory();
   if (name === "progress") renderProgress();
   if (name === "settings") renderSettings();
+  if (name === "weight")   renderWeightTab();
 }
 
 // ── DATE HELPERS ──────────────────────────────────────────────────────────
@@ -331,6 +336,7 @@ async function fetchFromSheets() {
     if (json.status !== "ok") throw new Error(json.message || "Unknown error");
 
     workouts = json.workouts;
+    if (Array.isArray(json.weightLog)) weightLog = json.weightLog;
     persist();
     setSyncStatus("ok", "Synced");
 
@@ -338,6 +344,7 @@ async function fetchFromSheets() {
     const activePanel = document.querySelector(".tab-panel.active")?.id;
     if (activePanel === "panel-history")  renderHistory();
     if (activePanel === "panel-progress") renderProgress();
+    if (activePanel === "panel-weight")   renderWeightTab();
 
   } catch (err) {
     console.error("Failed to fetch from Sheets:", err);
@@ -517,6 +524,267 @@ function clearAllHistory() {
   );
 }
 
+// ── WEIGHT ────────────────────────────────────────────────────────────────
+
+async function saveWeight() {
+  const date = document.getElementById("weight-date").value;
+  const val  = parseFloat(document.getElementById("weight-input").value);
+  if (!date)           { showToast("Select a date"); return; }
+  if (isNaN(val) || val <= 0) { showToast("Enter a valid weight"); return; }
+
+  const entry = { date, weight: val };
+  const idx   = weightLog.findIndex(e => e.date === date);
+  if (idx >= 0) weightLog[idx] = entry;
+  else          weightLog.push(entry);
+  weightLog.sort((a, b) => a.date.localeCompare(b.date));
+  persist();
+  renderWeightTab();
+  showToast("Weight logged ✓");
+  syncWeightToSheets(entry);
+}
+
+async function syncWeightToSheets(entry) {
+  if (!sheetsUrl) return;
+  try {
+    const res = await fetch(sheetsUrl, {
+      method:  "POST",
+      headers: { "Content-Type": "text/plain" },
+      body:    JSON.stringify({ _type: "weight", ...entry }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  } catch (err) {
+    console.error("Weight sync failed:", err);
+  }
+}
+
+async function deleteWeightEntry(date) {
+  weightLog = weightLog.filter(e => e.date !== date);
+  persist();
+  renderWeightTab();
+  if (sheetsUrl) {
+    try {
+      await fetch(sheetsUrl, {
+        method:  "POST",
+        headers: { "Content-Type": "text/plain" },
+        body:    JSON.stringify({ _deleteWeight: true, date }),
+      });
+    } catch (err) {
+      console.error("Weight delete failed:", err);
+    }
+  }
+}
+
+function setWeightLookback(days) {
+  weightLookback = days;
+  renderWeightTrendSection();
+}
+
+function renderWeightTab() {
+  renderWeightLogList();
+}
+
+function getFilteredWeightLog() {
+  if (!weightLookback) return weightLog;
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - weightLookback);
+  const cutoffISO = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, "0")}-${String(cutoff.getDate()).padStart(2, "0")}`;
+  return weightLog.filter(e => e.date >= cutoffISO);
+}
+
+function renderWeightLogList() {
+  const el = document.getElementById("weight-log-list");
+  if (!el) return;
+
+  if (!weightLog.length) {
+    el.innerHTML = `<div class="weight-empty">No entries yet — log your first weight above.</div>`;
+    return;
+  }
+
+  const sorted = [...weightLog].sort((a, b) => b.date.localeCompare(a.date));
+  el.innerHTML = `
+    <div class="weight-log-list">
+      ${sorted.map(e => `
+        <div class="weight-log-row">
+          <span class="weight-log-date">${formatDate(e.date)}</span>
+          <span class="weight-log-val">${e.weight} lbs</span>
+          <button class="btn btn-ghost btn-sm btn-danger"
+                  onclick="confirmDeleteWeight('${e.date}')">Delete</button>
+        </div>`).join("")}
+    </div>`;
+}
+
+function confirmDeleteWeight(date) {
+  showConfirm(
+    "Delete weight entry?",
+    `Remove the entry for ${formatDate(date)}? This cannot be undone.`,
+    () => deleteWeightEntry(date),
+    "Delete"
+  );
+}
+
+function renderWeightTrendSection() {
+  const section = document.getElementById("weight-trend-section");
+  if (!section) return;
+
+  if (!weightLog.length) { section.innerHTML = ""; return; }
+
+  const pillDefs = [
+    { label: "1M", days: 30  },
+    { label: "3M", days: 90  },
+    { label: "6M", days: 180 },
+    { label: "All", days: null },
+  ];
+  const pillsHtml = pillDefs.map(p => {
+    const active = weightLookback === p.days ? " active" : "";
+    const val    = p.days ?? "null";
+    return `<button class="lookback-pill${active}" data-days="${p.days ?? "all"}"
+                    onclick="setWeightLookback(${val})">${p.label}</button>`;
+  }).join("");
+
+  const filtered = getFilteredWeightLog();
+  let statHtml = "";
+  if (filtered.length >= 2) {
+    const diff = +(filtered[filtered.length - 1].weight - filtered[0].weight).toFixed(1);
+    const sign = diff > 0 ? "+" : "";
+    const cls  = diff < 0 ? "stat-down" : diff > 0 ? "stat-up" : "";
+    statHtml = `<div class="weight-trend-stat">
+      <span class="weight-stat-delta ${cls}">${sign}${diff} lbs</span> over this period
+    </div>`;
+  }
+
+  section.innerHTML = `
+    <div class="weight-trend-card">
+      <div class="weight-trend-header">
+        <span class="weight-trend-title">Weight</span>
+        <div class="lookback-pills">${pillsHtml}</div>
+      </div>
+      ${statHtml}
+      <div id="weight-chart-area"></div>
+    </div>`;
+
+  renderWeightChart();
+}
+
+// Group weight entries into Mon–Sun weeks
+function groupByWeek(entries) {
+  const map = {};
+  entries.forEach(({ date, weight }) => {
+    const [y, m, d] = date.split("-").map(Number);
+    const dt  = new Date(y, m - 1, d);
+    const dow = (dt.getDay() + 6) % 7; // 0 = Mon
+    const mon = new Date(dt);
+    mon.setDate(mon.getDate() - dow);
+    const key = `${mon.getFullYear()}-${String(mon.getMonth() + 1).padStart(2, "0")}-${String(mon.getDate()).padStart(2, "0")}`;
+    if (!map[key]) map[key] = [];
+    map[key].push(weight);
+  });
+  return Object.entries(map)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([weekStart, weights]) => ({
+      weekStart,
+      min: Math.min(...weights),
+      max: Math.max(...weights),
+      avg: weights.reduce((s, w) => s + w, 0) / weights.length,
+    }));
+}
+
+function renderWeightChart() {
+  const area     = document.getElementById("weight-chart-area");
+  if (!area) return;
+  const filtered = getFilteredWeightLog();
+
+  if (!filtered.length) {
+    area.innerHTML = `<div class="weight-empty">No weight data yet — log your first entry above.</div>`;
+    return;
+  }
+
+  if (filtered.length === 1) {
+    area.innerHTML = `<div class="weight-empty">${filtered[0].weight} lbs on ${formatDate(filtered[0].date)}</div>`;
+    return;
+  }
+
+  const weeks = groupByWeek(filtered);
+
+  if (weeks.length < 2) {
+    // Only one week — skip the chart, show a simple summary
+    const w = weeks[0];
+    area.innerHTML = `<div class="weight-empty">
+      <strong>${w.avg.toFixed(1)} lbs avg</strong> this week
+      (${w.min}–${w.max} lbs range)
+    </div>`;
+    return;
+  }
+
+  // SVG dimensions
+  const W = 600, H = 220, PL = 48, PR = 16, PT = 16, PB = 32;
+  const cW = W - PL - PR, cH = H - PT - PB;
+
+  const allVals  = weeks.flatMap(w => [w.min, w.max]);
+  const minVal   = Math.min(...allVals);
+  const maxVal   = Math.max(...allVals);
+  const pad      = Math.max((maxVal - minVal) * 0.15, 2);
+  const yMin     = minVal - pad;
+  const yMax     = maxVal + pad;
+
+  const xScale   = i => PL + (i / (weeks.length - 1)) * cW;
+  const yScale   = v => PT + cH - ((v - yMin) / (yMax - yMin)) * cH;
+
+  // Min/max band path
+  const topPts   = weeks.map((w, i) => `${xScale(i).toFixed(1)},${yScale(w.max).toFixed(1)}`);
+  const botPts   = weeks.map((w, i) => `${xScale(i).toFixed(1)},${yScale(w.min).toFixed(1)}`).reverse();
+  const bandPath = `M${topPts.join("L")}L${botPts.join("L")}Z`;
+
+  // Avg line
+  const avgPath  = weeks.map((w, i) =>
+    `${i === 0 ? "M" : "L"}${xScale(i).toFixed(1)},${yScale(w.avg).toFixed(1)}`).join("");
+
+  // Y-axis ticks
+  const yRange   = yMax - yMin;
+  const tickStep = yRange > 25 ? 10 : yRange > 12 ? 5 : 2;
+  const ticks    = [];
+  for (let t = Math.ceil(yMin / tickStep) * tickStep; t <= yMax; t += tickStep) ticks.push(t);
+
+  // X-axis labels — first week of each calendar month
+  const xLabels = [];
+  let lastMonth = -1;
+  weeks.forEach((w, i) => {
+    const mo = parseInt(w.weekStart.split("-")[1]);
+    if (mo !== lastMonth) {
+      lastMonth = mo;
+      const dt  = new Date(w.weekStart + "T12:00:00");
+      xLabels.push({ x: xScale(i), label: dt.toLocaleDateString("en-US", { month: "short" }) });
+    }
+  });
+
+  area.innerHTML = `
+    <svg class="weight-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Weight trend chart">
+      <defs>
+        <linearGradient id="band-grad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%"   stop-color="var(--color-primary)" stop-opacity="0.2"/>
+          <stop offset="100%" stop-color="var(--color-primary)" stop-opacity="0.04"/>
+        </linearGradient>
+      </defs>
+
+      ${ticks.map(t => `
+        <line x1="${PL}" y1="${yScale(t).toFixed(1)}" x2="${W - PR}" y2="${yScale(t).toFixed(1)}"
+              stroke="var(--color-divider)" stroke-width="1"/>
+        <text x="${PL - 6}" y="${yScale(t).toFixed(1)}" text-anchor="end" dominant-baseline="middle"
+              class="chart-tick">${Math.round(t)}</text>`).join("")}
+
+      <path d="${bandPath}" fill="url(#band-grad)"/>
+      <path d="${avgPath}" fill="none" stroke="var(--color-primary)"
+            stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+
+      ${weeks.map((w, i) => `
+        <circle cx="${xScale(i).toFixed(1)}" cy="${yScale(w.avg).toFixed(1)}" r="3"
+                fill="var(--color-primary)" stroke="var(--color-surface)" stroke-width="1.5"/>`).join("")}
+
+      ${xLabels.map(l => `
+        <text x="${l.x.toFixed(1)}" y="${H - 4}" text-anchor="middle"
+              class="chart-tick">${l.label}</text>`).join("")}
+    </svg>`;
+}
+
 // ── PROGRESS ──────────────────────────────────────────────────────────────
 
 // Returns the number of calendar days between two ISO date strings (a → b)
@@ -544,6 +812,7 @@ function renderProgress() {
   const grid       = document.getElementById("progress-grid");
   const streakArea = document.getElementById("streak-area");
   grid.innerHTML   = "";
+  renderWeightTrendSection();
 
   const streak = calcStreak();
   streakArea.innerHTML = streak > 0
@@ -556,7 +825,7 @@ function renderProgress() {
         <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
           <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
         </svg>
-        <h3>No data yet</h3>
+        <h3>No workout data yet</h3>
         <p>Complete a few workouts to track your personal bests here.</p>
       </div>`;
     return;
@@ -797,6 +1066,7 @@ document.addEventListener("click", e => {
 loadFromStorage();
 initTheme();
 document.getElementById("workout-date").value = todayISO();
+document.getElementById("weight-date").value   = todayISO();
 initLogPanel();
 
 updateQueueStatus();

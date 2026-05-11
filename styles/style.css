@@ -341,6 +341,72 @@ a,button,[role="button"],input,select{
 .modal-body p{font-size:var(--text-sm);color:var(--color-text-muted);margin-bottom:var(--space-4)}
 .modal-footer{display:flex;justify-content:flex-end;gap:var(--space-3);margin-top:var(--space-5)}
 
+/* ── WEIGHT TAB ───────────────────────────────────────────── */
+.weight-entry-row{display:flex;gap:var(--space-3);align-items:center;margin-bottom:var(--space-5)}
+.weight-entry-row .num-input{width:96px;font-size:var(--text-base)}
+.weight-controls{display:flex;align-items:center;justify-content:space-between;
+  flex-wrap:wrap;gap:var(--space-3);margin-bottom:var(--space-4)}
+
+/* lookback pills */
+.lookback-pills{display:flex;gap:var(--space-2)}
+.lookback-pill{padding:var(--space-1) var(--space-3);border-radius:var(--radius-full);
+  border:1px solid var(--color-border);background:transparent;
+  font-size:var(--text-xs);font-weight:500;color:var(--color-text-muted);
+  cursor:pointer;transition:background var(--transition),color var(--transition),border-color var(--transition)}
+.lookback-pill:hover{background:var(--color-surface-offset);color:var(--color-text)}
+.lookback-pill.active{background:var(--color-primary);border-color:var(--color-primary);
+  color:#fff}
+
+/* weight change stat */
+.weight-stat-delta{font-weight:600}
+.weight-stat-delta.stat-down{color:var(--color-success)}
+.weight-stat-delta.stat-up{color:var(--color-warning)}
+#weight-change-stat{font-size:var(--text-sm);color:var(--color-text-muted)}
+
+/* chart wrapper */
+#weight-chart-area{margin-top:var(--space-4)}
+.weight-chart{width:100%;height:auto;display:block;overflow:visible}
+.chart-tick{font-family:var(--font-mono);font-size:11px;fill:var(--color-text-muted)}
+
+/* empty/single-entry states */
+.weight-empty{
+  padding:var(--space-10) var(--space-4);text-align:center;
+  color:var(--color-text-muted);font-size:var(--text-sm);
+  border:1px dashed var(--color-border);border-radius:var(--radius-lg);
+}
+
+/* progress card delta colours */
+.pb-value.stat-down{color:var(--color-success)}
+.pb-value.stat-up{color:var(--color-warning)}
+
+/* ── WEIGHT LOG LIST (Weight tab) ─────────────────────────── */
+.weight-log-list{margin-top:var(--space-5);display:flex;flex-direction:column;gap:0}
+.weight-log-row{
+  display:flex;align-items:center;gap:var(--space-3);
+  padding:var(--space-3) 0;
+  border-bottom:1px solid var(--color-divider);
+}
+.weight-log-row:last-child{border-bottom:none}
+.weight-log-date{flex:1;font-size:var(--text-sm);color:var(--color-text)}
+.weight-log-val{font-size:var(--text-sm);font-weight:600;color:var(--color-text);
+  font-family:var(--font-mono);min-width:64px;text-align:right}
+
+/* ── WEIGHT TREND (Progress tab) ──────────────────────────── */
+.weight-trend-card{
+  background:var(--color-surface);border:1px solid var(--color-border);
+  border-radius:var(--radius-lg);padding:var(--space-5);
+  margin-bottom:var(--space-6);box-shadow:var(--shadow-sm);
+}
+.weight-trend-header{
+  display:flex;align-items:center;justify-content:space-between;
+  flex-wrap:wrap;gap:var(--space-3);margin-bottom:var(--space-3);
+}
+.weight-trend-title{font-size:var(--text-base);font-weight:600;color:var(--color-text)}
+.weight-trend-stat{
+  font-size:var(--text-sm);color:var(--color-text-muted);
+  margin-bottom:var(--space-3);
+}
+
 /* ── MOBILE ───────────────────────────────────────────────── */
 @media(max-width:500px){
   .topbar{padding:var(--space-3) var(--space-4)}

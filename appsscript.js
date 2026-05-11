@@ -7,55 +7,67 @@
    Create a new deployment version any time you update this file.
    ============================================================= */
 
-// ── GET — fetch all workouts (called by the app on load) ──────────────────
+// ── GET — fetch all workouts + weight log (called by the app on load) ─────
 
 function doGet(e) {
   try {
-    const sheet   = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Workouts");
-    const lastRow = sheet.getLastRow();
-
-    if (lastRow <= 1) {
-      return respond({ status: "ok", workouts: [] });
-    }
-
-    const rows       = sheet.getRange(2, 1, lastRow - 1, 6).getValues();
-    const workoutMap = {};
-
-    rows.forEach(([date, exercise, setNum, weight, reps, savedAt]) => {
-      const dateStr = formatDateCell(date);
-      if (!dateStr) return;
-
-      if (!workoutMap[dateStr]) {
-        workoutMap[dateStr] = {
-          date:      dateStr,
-          savedAt:   String(savedAt || ""),
-          exercises: {}
-        };
-      }
-
-      if (!workoutMap[dateStr].exercises[exercise]) {
-        workoutMap[dateStr].exercises[exercise] = {
-          id:   exerciseNameToId(String(exercise)),
-          name: String(exercise),
-          sets: []
-        };
-      }
-
-      workoutMap[dateStr].exercises[exercise].sets.push({
-        weight: weight !== "" && weight !== null ? Number(weight) : null,
-        reps:   reps   !== "" && reps   !== null ? Number(reps)   : null
-      });
-    });
-
-    const workouts = Object.values(workoutMap)
-      .map(w => ({ ...w, exercises: Object.values(w.exercises) }))
-      .sort((a, b) => b.date.localeCompare(a.date));
-
-    return respond({ status: "ok", workouts });
-
+    const workouts  = getWorkouts();
+    const weightLog = getWeightLog();
+    return respond({ status: "ok", workouts, weightLog });
   } catch (err) {
     return respond({ status: "error", message: err.toString() });
   }
+}
+
+function getWorkouts() {
+  const sheet   = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Workouts");
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return [];
+
+  const rows       = sheet.getRange(2, 1, lastRow - 1, 6).getValues();
+  const workoutMap = {};
+
+  rows.forEach(([date, exercise, setNum, weight, reps, savedAt]) => {
+    const dateStr = formatDateCell(date);
+    if (!dateStr) return;
+
+    if (!workoutMap[dateStr]) {
+      workoutMap[dateStr] = {
+        date:      dateStr,
+        savedAt:   String(savedAt || ""),
+        exercises: {}
+      };
+    }
+
+    if (!workoutMap[dateStr].exercises[exercise]) {
+      workoutMap[dateStr].exercises[exercise] = {
+        id:   exerciseNameToId(String(exercise)),
+        name: String(exercise),
+        sets: []
+      };
+    }
+
+    workoutMap[dateStr].exercises[exercise].sets.push({
+      weight: weight !== "" && weight !== null ? Number(weight) : null,
+      reps:   reps   !== "" && reps   !== null ? Number(reps)   : null
+    });
+  });
+
+  return Object.values(workoutMap)
+    .map(w => ({ ...w, exercises: Object.values(w.exercises) }))
+    .sort((a, b) => b.date.localeCompare(a.date));
+}
+
+function getWeightLog() {
+  const ss    = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Weight");
+  if (!sheet) return [];
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return [];
+
+  return sheet.getRange(2, 1, lastRow - 1, 2).getValues()
+    .map(([date, weight]) => ({ date: formatDateCell(date), weight: Number(weight) }))
+    .filter(r => r.date && !isNaN(r.weight));
 }
 
 // ── POST — save or update a workout ───────────────────────────────────────
@@ -75,6 +87,40 @@ function doPost(e) {
     if (data._deleteAll) {
       const lastRow = sheet.getLastRow();
       if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
+      return respond({ status: "ok" });
+    }
+
+    // Weight entry — upsert into the Weight sheet
+    if (data._type === "weight") {
+      const ss          = SpreadsheetApp.getActiveSpreadsheet();
+      let   weightSheet = ss.getSheetByName("Weight");
+      if (!weightSheet) {
+        weightSheet = ss.insertSheet("Weight");
+        weightSheet.appendRow(["Date", "Weight (lbs)"]);
+      }
+      const wLast = weightSheet.getLastRow();
+      if (wLast > 1) {
+        const dates = weightSheet.getRange(2, 1, wLast - 1, 1).getValues();
+        for (let i = dates.length - 1; i >= 0; i--) {
+          if (formatDateCell(dates[i][0]) === String(data.date)) weightSheet.deleteRow(i + 2);
+        }
+      }
+      weightSheet.appendRow([data.date, data.weight]);
+      return respond({ status: "ok" });
+    }
+
+    // Delete a single weight entry
+    if (data._deleteWeight) {
+      const weightSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Weight");
+      if (weightSheet) {
+        const wLast = weightSheet.getLastRow();
+        if (wLast > 1) {
+          const dates = weightSheet.getRange(2, 1, wLast - 1, 1).getValues();
+          for (let i = dates.length - 1; i >= 0; i--) {
+            if (formatDateCell(dates[i][0]) === String(data.date)) weightSheet.deleteRow(i + 2);
+          }
+        }
+      }
       return respond({ status: "ok" });
     }
 
