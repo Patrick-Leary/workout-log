@@ -302,11 +302,12 @@ a,button,[role="button"],input,select{
 
 /* ── TOAST ────────────────────────────────────────────────── */
 .toast{position:fixed;bottom:var(--space-6);left:50%;transform:translateX(-50%) translateY(120%);
-  background:var(--color-text);color:var(--color-bg);
+  opacity:0;background:var(--color-text);color:var(--color-bg);
   padding:var(--space-3) var(--space-5);border-radius:var(--radius-full);
   font-size:var(--text-sm);font-weight:500;box-shadow:var(--shadow-lg);
-  transition:transform 0.3s cubic-bezier(0.16,1,0.3,1);z-index:999;white-space:nowrap}
-.toast.show{transform:translateX(-50%) translateY(0)}
+  transition:transform 0.3s cubic-bezier(0.16,1,0.3,1),opacity 0.3s cubic-bezier(0.16,1,0.3,1);
+  z-index:999;white-space:nowrap}
+.toast.show{transform:translateX(-50%) translateY(0);opacity:1}
 
 /* ── MODAL ────────────────────────────────────────────────── */
 .modal-backdrop{position:fixed;inset:0;background:oklch(0 0 0/0.5);
