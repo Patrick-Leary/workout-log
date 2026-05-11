@@ -16,10 +16,12 @@ const EXERCISES = [
 
 // ── STATE ─────────────────────────────────────────────────────────────────
 
-let workouts    = [];
-let syncQueue   = [];
-let sheetsUrl   = "";
-let setCounters = {};
+let workouts       = [];
+let syncQueue      = [];
+let sheetsUrl      = "";
+let setCounters    = {};
+let addedExercises = [];
+let pickerOpen     = false;
 
 // ── PERSISTENCE ───────────────────────────────────────────────────────────
 
@@ -117,60 +119,90 @@ function getLastBest(exerciseId) {
   return null;
 }
 
-// ── EXERCISE FORM ─────────────────────────────────────────────────────────
+// ── LOG PANEL ─────────────────────────────────────────────────────────────
 
-function buildExerciseForms() {
-  setCounters = {};
-  const container = document.getElementById("exercises-container");
-  container.innerHTML = "";
+function initLogPanel() {
+  addedExercises = [];
+  pickerOpen     = false;
+  setCounters    = {};
+  document.getElementById("exercises-container").innerHTML = "";
+  updateAddExerciseBtn();
+}
 
-  EXERCISES.forEach(ex => {
-    const best = getLastBest(ex.id);
-    const defWeight = best?.weight ?? "";
-    const defReps   = best?.reps ?? (ex.amrap ? "" : ex.repRange?.[1] ?? "");
+function updateAddExerciseBtn() {
+  const available = EXERCISES.filter(ex => !addedExercises.includes(ex.id));
+  const row       = document.getElementById("add-exercise-row");
+  if (!available.length) { row.innerHTML = ""; return; }
 
-    const repHint  = ex.amrap ? "AMRAP" : `${ex.repRange[0]}–${ex.repRange[1]} reps`;
-    const prevText = best
-      ? (ex.weighted ? `Last: ${best.weight ?? "–"}lb × ${best.reps}` : `Last: ${best.reps} reps`)
-      : "First session";
-
-    const block = document.createElement("div");
-    block.className = "exercise-block";
-    block.dataset.exid = ex.id;
-
-    block.innerHTML = `
-      <div class="exercise-header">
-        <div>
-          <div class="exercise-name">${ex.name}</div>
-          <div class="exercise-hint">${repHint}${ex.perSide ? " · per side" : ""}</div>
-        </div>
-        <div style="display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap;justify-content:flex-end">
-          <span class="prev-best">${prevText}</span>
+  row.innerHTML = `
+    <button class="btn btn-ghost add-ex-btn" onclick="toggleExercisePicker(event)">+ Add Exercise</button>
+    <div class="exercise-picker${pickerOpen ? " open" : ""}" id="exercise-picker">
+      ${available.map(ex => `
+        <button class="picker-option" onclick="addExerciseToLog('${ex.id}')">
+          <span class="picker-name">${ex.name}</span>
           <span class="exercise-tag">${ex.tag}</span>
-        </div>
+        </button>`).join("")}
+    </div>`;
+}
+
+function toggleExercisePicker(e) {
+  e.stopPropagation();
+  pickerOpen = !pickerOpen;
+  document.getElementById("exercise-picker")?.classList.toggle("open", pickerOpen);
+}
+
+function addExerciseToLog(exId) {
+  if (addedExercises.includes(exId)) return;
+  addedExercises.push(exId);
+  pickerOpen = false;
+
+  const ex        = EXERCISES.find(e => e.id === exId);
+  const container = document.getElementById("exercises-container");
+  const best      = getLastBest(ex.id);
+  const prevText  = best
+    ? (ex.weighted ? `Last: ${best.weight ?? "–"}lb × ${best.reps}` : `Last: ${best.reps} reps`)
+    : "First session";
+
+  const block = document.createElement("div");
+  block.className    = "exercise-block";
+  block.dataset.exid = ex.id;
+  block.innerHTML    = `
+    <div class="exercise-header">
+      <div>
+        <div class="exercise-name">${ex.name}</div>
+        ${ex.perSide ? `<div class="exercise-hint">per side</div>` : ""}
       </div>
-      <table class="sets-table" aria-label="${ex.name} sets">
-        <thead>
-          <tr>
-            <th scope="col">#</th>
-            ${ex.weighted ? `<th scope="col">Weight (lbs)</th>` : ""}
-            <th scope="col">Reps</th>
-            <th scope="col">Done</th>
-            <th scope="col"><span class="sr-only">Remove</span></th>
-          </tr>
-        </thead>
-        <tbody id="sets-${ex.id}"></tbody>
-      </table>
-      <div class="add-set-row">
-        <button class="btn btn-ghost btn-sm" onclick="addSet('${ex.id}')">+ Add set</button>
-      </div>`;
+      <div style="display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap;justify-content:flex-end">
+        <span class="prev-best">${prevText}</span>
+        <span class="exercise-tag">${ex.tag}</span>
+        <button class="btn btn-ghost btn-sm btn-danger" onclick="removeExercise('${ex.id}')" aria-label="Remove ${ex.name}">×</button>
+      </div>
+    </div>
+    <table class="sets-table" aria-label="${ex.name} sets">
+      <thead>
+        <tr>
+          <th scope="col">#</th>
+          ${ex.weighted ? `<th scope="col">Weight (lbs)</th>` : ""}
+          <th scope="col">Reps</th>
+          <th scope="col"><span class="sr-only">Remove</span></th>
+        </tr>
+      </thead>
+      <tbody id="sets-${ex.id}"></tbody>
+    </table>
+    <div class="add-set-row">
+      <button class="btn btn-ghost btn-sm" onclick="addSet('${ex.id}')">+ Add set</button>
+    </div>`;
 
-    container.appendChild(block);
+  container.appendChild(block);
+  for (let i = 0; i < ex.defaultSets; i++) addSet(ex.id, "", "", false);
+  updateAddExerciseBtn();
+}
 
-    for (let i = 0; i < ex.defaultSets; i++) {
-      addSet(ex.id, defWeight, defReps, false);
-    }
-  });
+function removeExercise(exId) {
+  document.querySelector(`.exercise-block[data-exid="${exId}"]`)?.remove();
+  addedExercises = addedExercises.filter(id => id !== exId);
+  delete setCounters[exId];
+  updateAddExerciseBtn();
 }
 
 function addSet(exId, weight = "", reps = "", animate = true) {
@@ -191,7 +223,6 @@ function addSet(exId, weight = "", reps = "", animate = true) {
       : ""}
     <td><input class="num-input" type="number" min="0" max="999"
             value="${reps}" placeholder="reps" aria-label="Reps, set ${n}"></td>
-    <td><input type="checkbox" class="checkbox-done" aria-label="Set ${n} done"></td>
     <td><button class="btn btn-ghost btn-sm btn-danger"
             onclick="removeSet(this, '${exId}')" aria-label="Remove set ${n}">×</button></td>`;
 
@@ -201,20 +232,6 @@ function addSet(exId, weight = "", reps = "", animate = true) {
     tr.style.transition = "opacity 0.18s";
     tr.style.opacity = "1";
   });
-
-  const inputs   = tr.querySelectorAll("input[type=number]");
-  const repInput = inputs[inputs.length - 1];
-  const cb       = tr.querySelector(".checkbox-done");
-
-  repInput.addEventListener("input", () => {
-    if (repInput.value) cb.checked = true;
-    toggleDoneStyle(tr, cb);
-  });
-  cb.addEventListener("change", () => toggleDoneStyle(tr, cb));
-}
-
-function toggleDoneStyle(tr, cb) {
-  tr.classList.toggle("set-done-row", cb.checked);
 }
 
 function removeSet(btn, exId) {
@@ -227,11 +244,11 @@ function removeSet(btn, exId) {
 // ── COLLECT FORM DATA ─────────────────────────────────────────────────────
 
 function collectFormData() {
-  return EXERCISES.map(ex => {
-    const tbody = document.getElementById(`sets-${ex.id}`);
+  return addedExercises.map(exId => {
+    const ex    = EXERCISES.find(e => e.id === exId);
+    const tbody = document.getElementById(`sets-${exId}`);
     const sets  = Array.from(tbody.querySelectorAll("tr")).map(tr => {
       const inputs = tr.querySelectorAll("input[type=number]");
-      const cb     = tr.querySelector(".checkbox-done");
       let weight = null, reps = null;
       if (ex.weighted) {
         weight = parseFloat(inputs[0].value) || null;
@@ -239,7 +256,7 @@ function collectFormData() {
       } else {
         reps   = parseFloat(inputs[0].value) || null;
       }
-      return { weight, reps, done: cb?.checked ?? false };
+      return { weight, reps };
     });
     return { id: ex.id, name: ex.name, sets };
   });
@@ -282,7 +299,7 @@ async function saveWorkout() {
 }
 
 function clearForm() {
-  buildExerciseForms();
+  initLogPanel();
   document.getElementById("workout-date").value = todayISO();
 }
 
@@ -352,7 +369,7 @@ function renderHistory() {
 
   list.innerHTML = "";
   workouts.forEach((w, idx) => {
-    const doneSets = w.exercises.reduce((t, e) => t + e.sets.filter(s => s.done).length, 0);
+    const doneSets = w.exercises.reduce((t, e) => t + e.sets.filter(s => s.reps != null).length, 0);
     const pills    = w.exercises
       .filter(e => e.sets.some(s => s.reps))
       .map(e => `<span class="history-pill">${e.name}</span>`)
@@ -365,7 +382,7 @@ function renderHistory() {
         <div>
           <div class="history-date">${formatDate(w.date)}</div>
           <div class="history-summary">${pills}</div>
-          <div class="history-meta">${doneSets} sets completed</div>
+          <div class="history-meta">${doneSets} sets</div>
         </div>
         <div class="history-actions">
           <button class="btn btn-ghost btn-sm" onclick="toggleDetail(${idx}, this)">View</button>
@@ -380,14 +397,12 @@ function renderHistory() {
               <span>#</span>
               <span>${ex.sets.some(s => s.weight) ? "Weight" : ""}</span>
               <span>Reps</span>
-              <span>Done</span>
             </div>
             ${ex.sets.map((s, i) => `
               <div class="detail-set-row">
                 <span>${i + 1}</span>
                 <span>${s.weight != null ? s.weight + "lb" : "—"}</span>
                 <span>${s.reps ?? "—"}</span>
-                <span>${s.done ? "✓" : "·"}</span>
               </div>`).join("")}
           </div>`).join("")}
       </div>`;
@@ -654,7 +669,20 @@ document.getElementById("confirm-modal").addEventListener("click", e => {
 });
 
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape") closeModal();
+  if (e.key === "Escape") {
+    closeModal();
+    if (pickerOpen) {
+      pickerOpen = false;
+      document.getElementById("exercise-picker")?.classList.remove("open");
+    }
+  }
+});
+
+document.addEventListener("click", e => {
+  if (pickerOpen && !e.target.closest("#add-exercise-row")) {
+    pickerOpen = false;
+    document.getElementById("exercise-picker")?.classList.remove("open");
+  }
 });
 
 // ── INIT ──────────────────────────────────────────────────────────────────
@@ -662,7 +690,7 @@ document.addEventListener("keydown", e => {
 loadFromStorage();
 initTheme();
 document.getElementById("workout-date").value = todayISO();
-buildExerciseForms();
+initLogPanel();
 
 if (sheetsUrl) setSyncStatus("none", "Ready");
 updateQueueStatus();
