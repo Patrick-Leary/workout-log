@@ -305,6 +305,30 @@ function clearForm() {
 
 // ── GOOGLE SHEETS SYNC ────────────────────────────────────────────────────
 
+async function fetchFromSheets() {
+  if (!sheetsUrl) return;
+  setSyncStatus("pending", "Fetching…");
+  try {
+    const res  = await fetch(sheetsUrl);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    if (json.status !== "ok") throw new Error(json.message || "Unknown error");
+
+    workouts = json.workouts;
+    persist();
+    setSyncStatus("ok", "Synced");
+
+    // Refresh whichever data tab is currently visible
+    const activePanel = document.querySelector(".tab-panel.active")?.id;
+    if (activePanel === "panel-history")  renderHistory();
+    if (activePanel === "panel-progress") renderProgress();
+
+  } catch (err) {
+    console.error("Failed to fetch from Sheets:", err);
+    setSyncStatus("error", "Fetch failed — using local data");
+  }
+}
+
 async function syncToSheets(entry) {
   if (!sheetsUrl) return;
 
@@ -692,5 +716,9 @@ initTheme();
 document.getElementById("workout-date").value = todayISO();
 initLogPanel();
 
-if (sheetsUrl) setSyncStatus("none", "Ready");
 updateQueueStatus();
+
+// Fetch latest data from Sheets in the background — app is usable immediately
+// from localStorage cache while the request completes.
+if (sheetsUrl) fetchFromSheets();
+else setSyncStatus("", "");

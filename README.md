@@ -36,7 +36,7 @@ Your workout history is stored in your browser's `localStorage`. It persists bet
 
 ## Google Sheets Sync (Optional)
 
-Connect the app to a Google Sheet so every saved workout is automatically logged as rows of data.
+Connect the app to a Google Sheet for two-way sync. On every app load the latest data is fetched from Sheets, and every saved workout is pushed back — so both sides stay in sync. The sheet is also great for visualizing your data with charts and filters.
 
 ### 1. Create the Sheet
 
@@ -46,51 +46,14 @@ Connect the app to a Google Sheet so every saved workout is automatically logged
 
 | A | B | C | D | E | F |
 |---|---|---|---|---|---|
-| Date | Exercise | Set | Weight (lbs) | Reps | Done |
+| Date | Exercise | Set | Weight (lbs) | Reps | Saved At |
+
+> **Tip:** Format column A as **Plain text** (Format → Number → Plain text) to prevent Sheets from converting dates automatically.
 
 ### 2. Create the Apps Script
 
 1. In your Sheet, click **Extensions → Apps Script**
-2. Delete all default code and paste the following:
-
-```javascript
-function doPost(e) {
-  try {
-    const data = JSON.parse(e.postData.contents);
-
-    if (data._test) {
-      return ContentService
-        .createTextContent(JSON.stringify({ status: "ok", message: "Test successful" }))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Workouts");
-
-    data.exercises.forEach(exercise => {
-      exercise.sets.forEach((set, i) => {
-        sheet.appendRow([
-          data.date,
-          exercise.name,
-          i + 1,
-          set.weight ?? "",
-          set.reps ?? "",
-          set.done ? "Yes" : "No"
-        ]);
-      });
-    });
-
-    return ContentService
-      .createTextContent(JSON.stringify({ status: "ok" }))
-      .setMimeType(ContentService.MimeType.JSON);
-
-  } catch (err) {
-    return ContentService
-      .createTextContent(JSON.stringify({ status: "error", message: err.toString() }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}
-```
-
+2. Delete all default code and paste the contents of [`appsscript.js`](appsscript.js) from this repo
 3. Click **Save** and give the project any name (e.g. "Lift Log Sync")
 
 ### 3. Deploy as a Web App
@@ -111,7 +74,9 @@ function doPost(e) {
 3. Click **Save**, then **Test connection**
 4. You should see "Connection successful ✓"
 
-> **Note:** Every time you edit the Apps Script, create a **new deployment** for changes to take effect. Update the URL in Settings if it changes.
+Next time you open the app, it will automatically fetch the latest data from Sheets on load.
+
+> **Note:** Any time you update `appsscript.js`, open the Apps Script editor, paste the new code, and create a **new deployment version** (Deploy → Manage deployments → edit the existing deployment → select "New version"). The URL stays the same.
 
 ***
 
