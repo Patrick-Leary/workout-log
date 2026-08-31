@@ -12,7 +12,30 @@ const EXERCISES = [
   { id: "ohpress",    name: "Overhead Press",    tag: "Shoulders", defaultSets: 3, repRange: [10, 12], weighted: true  },
   { id: "rows",       name: "Dumbbell Rows",     tag: "Back",      defaultSets: 3, repRange: [10, 12], weighted: true,  perSide: true },
   { id: "curls",      name: "Bicep Curls",       tag: "Arms",      defaultSets: 2, repRange: [12, 15], weighted: true  },
+  // Home / dumbbell block — no gym required
+  { id: "pushups",    name: "Push-Ups",          tag: "Chest",     defaultSets: 3, repRange: null,     weighted: false, amrap: true },
+  { id: "splitsquat", name: "Split Squat",       tag: "Legs",      defaultSets: 3, repRange: [8, 10],  weighted: true,  perSide: true, hint: "per leg · enter 0 for bodyweight" },
+  { id: "rdl",        name: "Romanian Deadlift", tag: "Legs",      defaultSets: 3, repRange: [10, 12], weighted: true  },
+  { id: "latraise",   name: "Lateral Raise",     tag: "Shoulders", defaultSets: 3, repRange: [10, 12], weighted: true  },
+  { id: "hammercurl", name: "Hammer Curl",       tag: "Arms",      defaultSets: 3, repRange: [10, 15], weighted: true  },
 ];
+
+// ── EXERCISE HELPERS ──────────────────────────────────────────────────────
+
+// Parse a numeric input. Empty -> null, but a real 0 stays 0, so bodyweight
+// sets (e.g. split squats with no dumbbells) can be saved on a weighted lift.
+function numOrNull(v) {
+  const s = String(v ?? "").trim();
+  if (s === "") return null;
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Sub-label under the exercise name. Explicit `hint` wins; `perSide` is the
+// legacy shorthand for "per side".
+function exerciseHint(ex) {
+  return ex.hint ?? (ex.perSide ? "per side" : null);
+}
 
 // ── STATE ─────────────────────────────────────────────────────────────────
 
@@ -235,7 +258,7 @@ function addExerciseToLog(exId, prefilledSets = null) {
     <div class="exercise-header">
       <div>
         <div class="exercise-name">${ex.name}</div>
-        ${ex.perSide ? `<div class="exercise-hint">per side</div>` : ""}
+        ${exerciseHint(ex) ? `<div class="exercise-hint">${exerciseHint(ex)}</div>` : ""}
       </div>
       <div style="display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap;justify-content:flex-end">
         <span class="prev-best">${prevText}</span>
@@ -323,10 +346,10 @@ function collectFormData() {
       const inputs = tr.querySelectorAll("input[type=number]");
       let weight = null, reps = null;
       if (ex.weighted) {
-        weight = parseFloat(inputs[0].value) || null;
-        reps   = parseFloat(inputs[1].value) || null;
+        weight = numOrNull(inputs[0].value);
+        reps   = numOrNull(inputs[1].value);
       } else {
-        reps   = parseFloat(inputs[0].value) || null;
+        reps   = numOrNull(inputs[0].value);
       }
       return { weight, reps };
     });
@@ -945,7 +968,7 @@ function renderProgress() {
     const bestReps    = sessionBests.reduce((max, s) => Math.max(max, s.reps ?? 0), 0);
 
     let deltaHtml = "";
-    if (prevSession && ex.weighted && lastSession.weight && prevSession.weight) {
+    if (prevSession && ex.weighted && lastSession.weight != null && prevSession.weight != null) {
       const d = lastSession.weight - prevSession.weight;
       if (d > 0) deltaHtml = `<span class="pb-delta">+${d}lb</span>`;
     }
