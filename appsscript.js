@@ -42,12 +42,22 @@ function doGet(e) {
 
     const since = params.since || isoDaysAgo(DEFAULT_NUTRITION_DAYS);
 
+    // Foods and Nutrition are optional and hand-edited, so a malformed tab is
+    // plausible. Isolate them: a broken Foods tab must not stop workouts and
+    // weight from syncing.
+    const warnings = [];
+    const safely = (label, fn) => {
+      try { return fn(); }
+      catch (err) { warnings.push(label + ": " + err.message); return []; }
+    };
+
     return respond({
       status:    "ok",
       workouts:  getWorkouts(),
       weightLog: getWeightLog(),
-      foods:     getFoods(),
-      nutrition: getNutrition(since),
+      foods:     safely("Foods",     getFoods),
+      nutrition: safely("Nutrition", function () { return getNutrition(since); }),
+      warnings:  warnings,
     });
   } catch (err) {
     return respond({ status: "error", message: err.toString() });
@@ -115,7 +125,8 @@ function getFoods() {
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) return [];
 
-  return sheet.getRange(2, 1, lastRow - 1, 12).getValues()
+  const cols = Math.min(12, sheet.getLastColumn());
+  return sheet.getRange(2, 1, lastRow - 1, cols).getValues()
     .map(([key, name, brand, serving, cal, p, c, fib, fat, sat, na, verified]) => ({
       key:      String(key || "").trim(),
       name:     String(name || "").trim(),
@@ -134,7 +145,8 @@ function getNutrition(since) {
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) return [];
 
-  return sheet.getRange(2, 1, lastRow - 1, 15).getValues()
+  const cols = Math.min(15, sheet.getLastColumn());
+  return sheet.getRange(2, 1, lastRow - 1, cols).getValues()
     .map(([date, meal, key, item, qty, cal, p, c, fib, fat, sat, na, source, conf, savedAt]) => ({
       date:   formatDateCell(date),
       meal:   String(meal || ""),

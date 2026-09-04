@@ -24,7 +24,7 @@ const EXERCISES = [
 // the floor; protein has a band rather than a single number.
 const FOOD_TARGETS = { cal: 2650, calFloor: 2500, proteinMin: 150, proteinMax: 190 };
 
-const MEALS       = ["Pre", "Post", "Breakfast", "Lunch", "Snack", "Dinner"];
+const MEALS       = ["Breakfast", "Lunch", "Snack", "Dinner"];
 const FOOD_MACROS = ["cal", "p", "c", "fib", "fat", "sat", "na"];
 
 // ── EXERCISE HELPERS ──────────────────────────────────────────────────────
@@ -59,6 +59,7 @@ let foodQueue      = [];   // food days awaiting sync (kept apart from syncQueue
 let sheetsSecret   = "";
 let currentFoodDate = "";
 let foodQuery      = "";
+let foodDirty      = [];   // dates with local edits not yet accepted by Sheets
 let lastFoodResults = [];  // what the picker is currently showing
 let weightLookback = null; // null = all time
 let logDrafts      = {};   // { [dateISO]: exercises[] }
@@ -77,6 +78,7 @@ function loadFromStorage() {
     foods      = JSON.parse(localStorage.getItem("ll_foods")      || "[]");
     nutrition  = JSON.parse(localStorage.getItem("ll_nutrition")  || "[]");
     foodQueue  = JSON.parse(localStorage.getItem("ll_food_queue") || "[]");
+    foodDirty  = JSON.parse(localStorage.getItem("ll_food_dirty") || "[]");
     sheetsSecret = localStorage.getItem("ll_sheets_secret")       || "";
   } catch (e) {
     console.warn("Could not read localStorage:", e);
@@ -92,6 +94,7 @@ function persist() {
     localStorage.setItem("ll_foods",      JSON.stringify(foods));
     localStorage.setItem("ll_nutrition",  JSON.stringify(nutrition));
     localStorage.setItem("ll_food_queue", JSON.stringify(foodQueue));
+    localStorage.setItem("ll_food_dirty", JSON.stringify(foodDirty));
     localStorage.setItem("ll_sheets_secret", sheetsSecret);
   } catch (e) {
     console.warn("Could not write localStorage:", e);
@@ -485,7 +488,18 @@ async function fetchFromSheets() {
     workouts = json.workouts;
     if (Array.isArray(json.weightLog)) weightLog = json.weightLog;
     if (Array.isArray(json.foods))     foods     = json.foods;
-    if (Array.isArray(json.nutrition)) nutrition = json.nutrition;
+    // Sheet rows carry no id, but the quantity and remove controls address
+    // items by id — without one they render fine and then refuse to be edited.
+    if (Array.isArray(json.nutrition)) {
+      // A day with unsaved local edits must survive the fetch. Overwriting
+      // wholesale silently discarded anything added but not yet saved.
+      const dirty = new Set(foodDirty);
+      const fromSheet = json.nutrition
+        .filter(it => !dirty.has(it.date))
+        .map(it => ({ ...it, id: it.id || newFoodId() }));
+      const keptLocal = nutrition.filter(it => dirty.has(it.date));
+      nutrition = [...fromSheet, ...keptLocal];
+    }
     persist();
     setSyncStatus("ok", "Synced");
 
@@ -553,7 +567,12 @@ async function retryQueue() {
 function setSyncStatus(state, label) {
   const el = document.getElementById("sync-status");
   if (!el) return;
-  if (!sheetsUrl) { el.innerHTML = ""; return; }
+  // Sync settings are per-browser, so a device that has never had the URL
+  // pasted in looks identical to a broken app. Say which it is.
+  if (!sheetsUrl) {
+    el.innerHTML = `<span class="sync-dot"></span>Not connected`;
+    return;
+  }
   el.innerHTML = `<span class="sync-dot ${state}"></span>${label}`;
 }
 
@@ -1036,14 +1055,20 @@ function fmtNum(n) {
 }
 
 // Pick the meal slot from the clock so the common case needs no interaction.
+// There are deliberately no pre-/post-workout slots: training times already
+// live in the Workouts tab, so anything timed around a session is a join on
+// date rather than a second, vaguer copy of the same fact.
 function defaultMeal() {
   const h = new Date().getHours();
-  if (h < 8)  return "Pre";
-  if (h < 11) return "Post";
-  if (h < 14) return "Lunch";
+  if (h < 11) return "Breakfast";
+  if (h < 15) return "Lunch";
   if (h < 17) return "Snack";
   if (h < 21) return "Dinner";
   return "Snack";
+}
+
+function markFoodDirty(date) {
+  if (!foodDirty.includes(date)) foodDirty.push(date);
 }
 
 function foodItemsFor(date) {
@@ -1096,8 +1121,12 @@ function renderFoodResults() {
   if (!el) return;
 
   if (!foods.length) {
-    el.innerHTML = `<div class="food-empty">No food database found. Add a <strong>Foods</strong>
-      tab to your sheet (see <code>appsscript.js</code>), then reload.</div>`;
+    el.innerHTML = sheetsUrl
+      ? `<div class="food-empty">No food database found. Add a <strong>Foods</strong>
+         tab to your sheet (see <code>appsscript.js</code>), then reload.</div>`
+      : `<div class="food-empty"><strong>This browser isn't connected to your sheet.</strong><br>
+         Paste your deployment URL in <strong>Settings</strong>, then reload. Sync settings are
+         stored per browser, so each device needs it entered once.</div>`;
     return;
   }
 
@@ -1139,6 +1168,7 @@ function addFood(f) {
   };
   FOOD_MACROS.forEach(k => { item[k] = Number(f[k]) || 0; });
   nutrition.push(item);
+  markFoodDirty(currentFoodDate);
 
   foodQuery = "";
   const box = document.getElementById("food-search");
@@ -1168,6 +1198,7 @@ function addCustomFood() {
     item[k] = numOrNull(document.getElementById(`cf-${k}`)?.value) ?? 0;
   });
   nutrition.push(item);
+  markFoodDirty(currentFoodDate);
 
   ["name", ...FOOD_MACROS].forEach(k => {
     const el = document.getElementById(`cf-${k}`);
@@ -1200,11 +1231,14 @@ function stepFoodQty(id, delta) {
     it[k] = Math.round((Number(base[k]) || 0) * next * 10) / 10;
   });
   it.qty = next;
+  markFoodDirty(it.date);
   persist();
   renderFoodTab();
 }
 
 function removeFoodItem(id) {
+  const it = nutrition.find(n => n.id === id);
+  if (it) markFoodDirty(it.date);
   nutrition = nutrition.filter(n => n.id !== id);
   persist();
   renderFoodTab();
@@ -1214,7 +1248,12 @@ function removeFoodItem(id) {
 
 async function saveFoodDay() {
   const items = foodItemsFor(currentFoodDate);
-  if (!items.length) { showToast("Nothing to save"); return; }
+  // An empty day is worth saving if it used to have items — that's how you
+  // clear a mistaken day from the sheet.
+  if (!items.length && !foodDirty.includes(currentFoodDate)) {
+    showToast("Nothing to save");
+    return;
+  }
 
   const entry = {
     _type:   "food",
@@ -1228,6 +1267,10 @@ async function saveFoodDay() {
     })),
   };
 
+  if (!sheetsUrl) {
+    showToast("Saved on this device — Sheets not connected");
+    return;
+  }
   showToast(`Saved ${items.length} item(s) ✓`);
   syncFoodToSheets(entry);
 }
@@ -1239,6 +1282,7 @@ async function syncFoodToSheets(entry) {
     await postToSheets(entry);
     setSyncStatus("ok", "Synced");
     foodQueue = foodQueue.filter(q => q.date !== entry.date);
+    foodDirty = foodDirty.filter(d => d !== entry.date);  // Sheets has it now
   } catch (err) {
     console.error("Food sync failed:", err);
     setSyncStatus("error", "Sync failed — queued");
@@ -1247,6 +1291,7 @@ async function syncFoodToSheets(entry) {
   }
   persist();
   updateQueueStatus();
+  renderFoodTab();
 }
 
 // ── FOOD: render ──────────────────────────────────────────────────────────
@@ -1271,6 +1316,8 @@ function renderFoodTotals() {
   const remLabel = rem > 0
     ? `${fmtNum(rem)} to go`
     : `${fmtNum(-rem)} over`;
+  const unsaved = foodDirty.includes(currentFoodDate)
+    ? `<span class="food-unsaved">Unsaved — press Save Day</span>` : "";
 
   el.innerHTML = `
     <div class="food-totals">
@@ -1290,6 +1337,7 @@ function renderFoodTotals() {
         <div class="food-bar-fill" style="width:${pct}%"></div>
         <div class="food-bar-floor" style="left:${floorPct}%" title="2,500 floor"></div>
       </div>
+      ${unsaved}
       <div class="food-macro-row">
         <span><b>${fmtNum(t.c)}</b> carb</span>
         <span><b>${fmtNum(t.fib)}</b> fib</span>
@@ -1352,14 +1400,18 @@ function renderSettings() {
   updateQueueStatus();
 }
 
-function saveSettings() {
+async function saveSettings() {
   const input  = document.getElementById("sheets-url");
   const secret = document.getElementById("sheets-secret");
   sheetsUrl    = (input?.value  || "").trim();
   sheetsSecret = (secret?.value || "").trim();
   persist();
-  setSyncStatus(sheetsUrl ? "none" : "", sheetsUrl ? "Ready" : "");
   showToast("Settings saved");
+
+  // Pull straight away. Waiting until the next page load meant a freshly
+  // configured device sat on "Ready" with no data and no reason given.
+  if (sheetsUrl) await fetchFromSheets();
+  else setSyncStatus("", "");
 }
 
 async function testConnection() {
