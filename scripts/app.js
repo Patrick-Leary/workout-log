@@ -20,6 +20,13 @@ const EXERCISES = [
   { id: "hammercurl", name: "Hammer Curl",       tag: "Arms",      defaultSets: 3, repRange: [10, 15], weighted: true  },
 ];
 
+// Nutrition targets — from the lean-bulk plan. 2,650 is the target and 2,500
+// the floor; protein has a band rather than a single number.
+const FOOD_TARGETS = { cal: 2650, calFloor: 2500, proteinMin: 150, proteinMax: 190 };
+
+const MEALS       = ["Pre", "Post", "Breakfast", "Lunch", "Snack", "Dinner"];
+const FOOD_MACROS = ["cal", "p", "c", "fib", "fat", "sat", "na"];
+
 // ── EXERCISE HELPERS ──────────────────────────────────────────────────────
 
 // Parse a numeric input. Empty -> null, but a real 0 stays 0, so bodyweight
@@ -46,6 +53,13 @@ let setCounters    = {};
 let addedExercises = [];
 let pickerOpen     = false;
 let weightLog      = [];
+let foods          = [];   // the food database, read-only from the Foods tab
+let nutrition      = [];   // logged food items across all loaded dates
+let foodQueue      = [];   // food days awaiting sync (kept apart from syncQueue)
+let sheetsSecret   = "";
+let currentFoodDate = "";
+let foodQuery      = "";
+let lastFoodResults = [];  // what the picker is currently showing
 let weightLookback = null; // null = all time
 let logDrafts      = {};   // { [dateISO]: exercises[] }
 let currentLogDate = "";
@@ -60,6 +74,10 @@ function loadFromStorage() {
     sheetsUrl  = localStorage.getItem("ll_sheets_url")            || "";
     weightLog  = JSON.parse(localStorage.getItem("ll_weight")     || "[]");
     logDrafts  = JSON.parse(localStorage.getItem("ll_drafts")     || "{}");
+    foods      = JSON.parse(localStorage.getItem("ll_foods")      || "[]");
+    nutrition  = JSON.parse(localStorage.getItem("ll_nutrition")  || "[]");
+    foodQueue  = JSON.parse(localStorage.getItem("ll_food_queue") || "[]");
+    sheetsSecret = localStorage.getItem("ll_sheets_secret")       || "";
   } catch (e) {
     console.warn("Could not read localStorage:", e);
   }
@@ -71,6 +89,10 @@ function persist() {
     localStorage.setItem("ll_queue",      JSON.stringify(syncQueue));
     localStorage.setItem("ll_sheets_url", sheetsUrl);
     localStorage.setItem("ll_weight",     JSON.stringify(weightLog));
+    localStorage.setItem("ll_foods",      JSON.stringify(foods));
+    localStorage.setItem("ll_nutrition",  JSON.stringify(nutrition));
+    localStorage.setItem("ll_food_queue", JSON.stringify(foodQueue));
+    localStorage.setItem("ll_sheets_secret", sheetsSecret);
   } catch (e) {
     console.warn("Could not write localStorage:", e);
   }
@@ -166,7 +188,7 @@ function updateThemeIcon(btn, theme) {
 
 // ── TABS ──────────────────────────────────────────────────────────────────
 
-const TAB_IDS = ["log", "weight", "history", "progress", "settings"];
+const TAB_IDS = ["log", "weight", "food", "history", "progress", "settings"];
 
 function switchTab(name) {
   TAB_IDS.forEach(id => {
@@ -177,6 +199,7 @@ function switchTab(name) {
   if (name === "progress") renderProgress();
   if (name === "settings") renderSettings();
   if (name === "weight")   renderWeightTab();
+  if (name === "food")     renderFoodTab();
 }
 
 // ── DATE HELPERS ──────────────────────────────────────────────────────────
@@ -430,17 +453,39 @@ function clearForm() {
 
 // ── GOOGLE SHEETS SYNC ────────────────────────────────────────────────────
 
+// Every write goes through here, so the shared secret is attached in one
+// place and every caller gets the same error handling.
+async function postToSheets(payload) {
+  const body = sheetsSecret ? { ...payload, _key: sheetsSecret } : payload;
+  const res  = await fetch(sheetsUrl, {
+    method:  "POST",
+    headers: { "Content-Type": "text/plain" },
+    body:    JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json();
+  if (json.status !== "ok") throw new Error(json.message || "Unknown error");
+  return json;
+}
+
+function sheetsGetUrl() {
+  const sep = sheetsUrl.includes("?") ? "&" : "?";
+  return sheetsSecret ? `${sheetsUrl}${sep}key=${encodeURIComponent(sheetsSecret)}` : sheetsUrl;
+}
+
 async function fetchFromSheets() {
   if (!sheetsUrl) return;
   setSyncStatus("pending", "Fetching…");
   try {
-    const res  = await fetch(sheetsUrl);
+    const res  = await fetch(sheetsGetUrl());
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     if (json.status !== "ok") throw new Error(json.message || "Unknown error");
 
     workouts = json.workouts;
     if (Array.isArray(json.weightLog)) weightLog = json.weightLog;
+    if (Array.isArray(json.foods))     foods     = json.foods;
+    if (Array.isArray(json.nutrition)) nutrition = json.nutrition;
     persist();
     setSyncStatus("ok", "Synced");
 
@@ -449,6 +494,7 @@ async function fetchFromSheets() {
     if (activePanel === "panel-history")  renderHistory();
     if (activePanel === "panel-progress") renderProgress();
     if (activePanel === "panel-weight")   renderWeightTab();
+    if (activePanel === "panel-food")     renderFoodTab();
 
   } catch (err) {
     console.error("Failed to fetch from Sheets:", err);
@@ -459,12 +505,7 @@ async function fetchFromSheets() {
 async function clearSheetsHistory() {
   if (!sheetsUrl) return;
   try {
-    const res = await fetch(sheetsUrl, {
-      method:  "POST",
-      headers: { "Content-Type": "text/plain" },
-      body:    JSON.stringify({ _deleteAll: true }),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    await postToSheets({ _deleteAll: true });
   } catch (err) {
     console.error("Failed to clear Sheets history:", err);
   }
@@ -473,12 +514,7 @@ async function clearSheetsHistory() {
 async function deleteFromSheets(date) {
   if (!sheetsUrl) return;
   try {
-    const res = await fetch(sheetsUrl, {
-      method:  "POST",
-      headers: { "Content-Type": "text/plain" },
-      body:    JSON.stringify({ _delete: true, date }),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    await postToSheets({ _delete: true, date });
   } catch (err) {
     console.error("Failed to delete from Sheets:", err);
   }
@@ -489,14 +525,7 @@ async function syncToSheets(entry) {
 
   setSyncStatus("pending", "Syncing…");
   try {
-    const res = await fetch(sheetsUrl, {
-      method:  "POST",
-      headers: { "Content-Type": "text/plain" },
-      body:    JSON.stringify(entry),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = await res.json();
-    if (json.status !== "ok") throw new Error(json.message || "Unknown error");
+    await postToSheets(entry);
 
     setSyncStatus("ok", "Synced");
     syncQueue = syncQueue.filter(q => q.date !== entry.date);
@@ -513,12 +542,12 @@ async function syncToSheets(entry) {
 }
 
 async function retryQueue() {
-  if (!syncQueue.length) { showToast("Queue is empty"); return; }
-  showToast(`Retrying ${syncQueue.length} item(s)…`);
-  const toRetry = [...syncQueue];
-  for (const entry of toRetry) {
-    await syncToSheets(entry);
-  }
+  const pending = syncQueue.length + foodQueue.length;
+  if (!pending) { showToast("Queue is empty"); return; }
+  showToast(`Retrying ${pending} item(s)…`);
+  for (const entry of [...syncQueue])  await syncToSheets(entry);
+  for (const entry of [...foodQueue])  await syncFoodToSheets(entry);
+  updateQueueStatus();
 }
 
 function setSyncStatus(state, label) {
@@ -651,12 +680,7 @@ async function saveWeight() {
 async function syncWeightToSheets(entry) {
   if (!sheetsUrl) return;
   try {
-    const res = await fetch(sheetsUrl, {
-      method:  "POST",
-      headers: { "Content-Type": "text/plain" },
-      body:    JSON.stringify({ _type: "weight", ...entry }),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    await postToSheets({ _type: "weight", ...entry });
   } catch (err) {
     console.error("Weight sync failed:", err);
   }
@@ -668,11 +692,7 @@ async function deleteWeightEntry(date) {
   renderWeightTab();
   if (sheetsUrl) {
     try {
-      await fetch(sheetsUrl, {
-        method:  "POST",
-        headers: { "Content-Type": "text/plain" },
-        body:    JSON.stringify({ _deleteWeight: true, date }),
-      });
+      await postToSheets({ _deleteWeight: true, date });
     } catch (err) {
       console.error("Weight delete failed:", err);
     }
@@ -1000,17 +1020,343 @@ function renderProgress() {
   });
 }
 
+// ── FOOD ──────────────────────────────────────────────────────────────────
+
+// Everything that reaches innerHTML below is escaped. Unlike exercise names,
+// which come from a fixed list, food names come from the Foods tab and from
+// free-text custom entries.
+function esc(str) {
+  return String(str ?? "").replace(/[&<>"']/g, ch =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+}
+
+function fmtNum(n) {
+  const v = Math.round(Number(n) || 0);
+  return v.toLocaleString("en-US");
+}
+
+// Pick the meal slot from the clock so the common case needs no interaction.
+function defaultMeal() {
+  const h = new Date().getHours();
+  if (h < 8)  return "Pre";
+  if (h < 11) return "Post";
+  if (h < 14) return "Lunch";
+  if (h < 17) return "Snack";
+  if (h < 21) return "Dinner";
+  return "Snack";
+}
+
+function foodItemsFor(date) {
+  return nutrition.filter(n => n.date === date);
+}
+
+function foodTotals(items) {
+  const t = {};
+  FOOD_MACROS.forEach(k => {
+    t[k] = items.reduce((sum, it) => sum + (Number(it[k]) || 0), 0);
+  });
+  return t;
+}
+
+// ── FOOD: picker ──────────────────────────────────────────────────────────
+
+// With no query, show what was actually eaten most recently. Repeat days are
+// the common case, and this is what makes them fast.
+function recentFoods() {
+  const seen  = [];
+  // Newest date first, and within a date the most recently added first —
+  // sorting on date alone leaves same-day items in insertion order, which
+  // surfaces the oldest item of today rather than the newest.
+  [...nutrition.entries()]
+    .sort(([ia, a], [ib, b]) => b.date.localeCompare(a.date) || ib - ia)
+    .forEach(([, n]) => {
+      if (n.key && !seen.includes(n.key)) seen.push(n.key);
+    });
+  const byKey  = Object.fromEntries(foods.map(f => [f.key, f]));
+  const recent = seen.map(k => byKey[k]).filter(Boolean);
+  return [...recent, ...foods.filter(f => !seen.includes(f.key))];
+}
+
+function foodSearchResults() {
+  const q = foodQuery.trim().toLowerCase();
+  const pool = q
+    ? foods.filter(f => `${f.name} ${f.brand}`.toLowerCase().includes(q))
+    : recentFoods();
+  lastFoodResults = pool.slice(0, 8);
+  return lastFoodResults;
+}
+
+function onFoodSearch(value) {
+  foodQuery = value;
+  renderFoodResults();
+}
+
+function renderFoodResults() {
+  const el = document.getElementById("food-results");
+  if (!el) return;
+
+  if (!foods.length) {
+    el.innerHTML = `<div class="food-empty">No food database found. Add a <strong>Foods</strong>
+      tab to your sheet (see <code>appsscript.js</code>), then reload.</div>`;
+    return;
+  }
+
+  const results = foodSearchResults();
+  if (!results.length) {
+    el.innerHTML = `<div class="food-empty">No match. Use <strong>Custom item</strong> below
+      for anything not in the database.</div>`;
+    return;
+  }
+
+  el.innerHTML = results.map((f, i) => `
+    <button class="food-result" onclick="addFoodResult(${i})">
+      <span class="fr-name">${esc(f.name)}${f.brand ? ` <span class="fr-brand">${esc(f.brand)}</span>` : ""}</span>
+      <span class="fr-meta">${fmtNum(f.cal)} cal · ${fmtNum(f.p)}g P<span class="fr-serving">${esc(f.serving)}</span></span>
+    </button>`).join("");
+}
+
+// ── FOOD: mutations ───────────────────────────────────────────────────────
+
+function newFoodId() {
+  return `f${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
+}
+
+// The picker addresses results positionally so nothing from the sheet is ever
+// interpolated into an inline handler.
+function addFoodResult(i) {
+  const f = lastFoodResults[i];
+  if (!f) { showToast("Food not found"); return; }
+  addFood(f);
+}
+
+function addFood(f) {
+  const meal = document.getElementById("food-meal")?.value || defaultMeal();
+  const item = {
+    id: newFoodId(), date: currentFoodDate, meal,
+    key: f.key, name: f.name, qty: 1,
+    source: f.verified ? "label" : "estimate",
+    conf:   f.verified ? "high"  : "med",
+  };
+  FOOD_MACROS.forEach(k => { item[k] = Number(f[k]) || 0; });
+  nutrition.push(item);
+
+  foodQuery = "";
+  const box = document.getElementById("food-search");
+  if (box) box.value = "";
+  persist();
+  renderFoodTab();
+}
+
+function toggleCustomFood(open) {
+  const el = document.getElementById("food-custom");
+  if (!el) return;
+  el.hidden = !open;
+  if (open) document.getElementById("cf-name")?.focus();
+}
+
+function addCustomFood() {
+  const name = document.getElementById("cf-name")?.value?.trim();
+  if (!name) { showToast("Give the item a name"); return; }
+
+  const item = {
+    id: newFoodId(), date: currentFoodDate,
+    meal: document.getElementById("food-meal")?.value || defaultMeal(),
+    key: "", name, qty: 1, source: "manual",
+    conf: document.getElementById("cf-conf")?.value || "med",
+  };
+  FOOD_MACROS.forEach(k => {
+    item[k] = numOrNull(document.getElementById(`cf-${k}`)?.value) ?? 0;
+  });
+  nutrition.push(item);
+
+  ["name", ...FOOD_MACROS].forEach(k => {
+    const el = document.getElementById(`cf-${k}`);
+    if (el) el.value = "";
+  });
+  toggleCustomFood(false);
+  persist();
+  renderFoodTab();
+}
+
+// Per-serving values, so changing quantity never compounds rounding error.
+// Prefers the database row; falls back to dividing out for custom items.
+function foodBase(it) {
+  const f = it.key ? foods.find(x => x.key === it.key) : null;
+  if (f) return f;
+  const q = Number(it.qty) || 1;
+  const b = {};
+  FOOD_MACROS.forEach(k => { b[k] = (Number(it[k]) || 0) / q; });
+  return b;
+}
+
+function stepFoodQty(id, delta) {
+  const it = nutrition.find(n => n.id === id);
+  if (!it) return;
+  const next = Math.round(((Number(it.qty) || 1) + delta) * 100) / 100;
+  if (next < 0.25) { removeFoodItem(id); return; }
+
+  const base = foodBase(it);
+  FOOD_MACROS.forEach(k => {
+    it[k] = Math.round((Number(base[k]) || 0) * next * 10) / 10;
+  });
+  it.qty = next;
+  persist();
+  renderFoodTab();
+}
+
+function removeFoodItem(id) {
+  nutrition = nutrition.filter(n => n.id !== id);
+  persist();
+  renderFoodTab();
+}
+
+// ── FOOD: save + sync ─────────────────────────────────────────────────────
+
+async function saveFoodDay() {
+  const items = foodItemsFor(currentFoodDate);
+  if (!items.length) { showToast("Nothing to save"); return; }
+
+  const entry = {
+    _type:   "food",
+    date:    currentFoodDate,
+    savedAt: new Date().toISOString(),
+    items:   items.map(it => ({
+      meal: it.meal, key: it.key, name: it.name, qty: it.qty,
+      cal: it.cal, p: it.p, c: it.c, fib: it.fib,
+      fat: it.fat, sat: it.sat, na: it.na,
+      source: it.source, conf: it.conf,
+    })),
+  };
+
+  showToast(`Saved ${items.length} item(s) ✓`);
+  syncFoodToSheets(entry);
+}
+
+async function syncFoodToSheets(entry) {
+  if (!sheetsUrl) return;
+  setSyncStatus("pending", "Syncing…");
+  try {
+    await postToSheets(entry);
+    setSyncStatus("ok", "Synced");
+    foodQueue = foodQueue.filter(q => q.date !== entry.date);
+  } catch (err) {
+    console.error("Food sync failed:", err);
+    setSyncStatus("error", "Sync failed — queued");
+    foodQueue = foodQueue.filter(q => q.date !== entry.date);
+    foodQueue.push(entry);
+  }
+  persist();
+  updateQueueStatus();
+}
+
+// ── FOOD: render ──────────────────────────────────────────────────────────
+
+function renderFoodTab() {
+  renderFoodTotals();
+  renderFoodResults();
+  renderFoodItems();
+}
+
+function renderFoodTotals() {
+  const el = document.getElementById("food-totals");
+  if (!el) return;
+
+  const t   = foodTotals(foodItemsFor(currentFoodDate));
+  const rem = FOOD_TARGETS.cal - t.cal;
+  const pct = Math.min(100, (t.cal / FOOD_TARGETS.cal) * 100);
+  const floorPct = (FOOD_TARGETS.calFloor / FOOD_TARGETS.cal) * 100;
+
+  const proteinState = t.p >= FOOD_TARGETS.proteinMin ? "ok"
+                     : t.p >= 130                     ? "near" : "under";
+  const remLabel = rem > 0
+    ? `${fmtNum(rem)} to go`
+    : `${fmtNum(-rem)} over`;
+
+  el.innerHTML = `
+    <div class="food-totals">
+      <div class="food-total-main">
+        <div class="food-total-block">
+          <span class="ft-num">${fmtNum(t.cal)}</span>
+          <span class="ft-unit">cal</span>
+          <span class="ft-sub">${remLabel} · target ${fmtNum(FOOD_TARGETS.cal)}</span>
+        </div>
+        <div class="food-total-block">
+          <span class="ft-num ft-${proteinState}">${fmtNum(t.p)}</span>
+          <span class="ft-unit">g protein</span>
+          <span class="ft-sub">band ${FOOD_TARGETS.proteinMin}–${FOOD_TARGETS.proteinMax}</span>
+        </div>
+      </div>
+      <div class="food-bar" role="img" aria-label="${fmtNum(t.cal)} of ${fmtNum(FOOD_TARGETS.cal)} calories">
+        <div class="food-bar-fill" style="width:${pct}%"></div>
+        <div class="food-bar-floor" style="left:${floorPct}%" title="2,500 floor"></div>
+      </div>
+      <div class="food-macro-row">
+        <span><b>${fmtNum(t.c)}</b> carb</span>
+        <span><b>${fmtNum(t.fib)}</b> fib</span>
+        <span><b>${fmtNum(t.fat)}</b> fat</span>
+        <span><b>${fmtNum(t.sat)}</b> sat</span>
+        <span class="${t.na > 3500 ? "fm-warn" : ""}"><b>${fmtNum(t.na)}</b> mg Na</span>
+      </div>
+    </div>`;
+}
+
+function renderFoodItems() {
+  const el = document.getElementById("food-items");
+  if (!el) return;
+
+  const items = foodItemsFor(currentFoodDate);
+  if (!items.length) {
+    el.innerHTML = `<div class="food-empty">Nothing logged for this day yet.</div>`;
+    return;
+  }
+
+  const groups = MEALS
+    .map(meal => ({ meal, rows: items.filter(i => i.meal === meal) }))
+    .filter(g => g.rows.length);
+
+  // Anything with an unrecognised meal slot (e.g. edited in the sheet by hand)
+  // still has to appear, or it would be invisible but still counted.
+  const other = items.filter(i => !MEALS.includes(i.meal));
+  if (other.length) groups.push({ meal: "Other", rows: other });
+
+  el.innerHTML = groups.map(g => `
+    <div class="food-group">
+      <div class="food-group-head">
+        <span>${esc(g.meal)}</span>
+        <span class="food-group-cal">${fmtNum(foodTotals(g.rows).cal)} cal</span>
+      </div>
+      ${g.rows.map(it => `
+        <div class="food-item">
+          <div class="fi-main">
+            <div class="fi-name">${esc(it.name)}<span class="fi-src fi-${esc(it.source)}">${esc(it.source)}</span></div>
+            <div class="fi-macros">${fmtNum(it.cal)} cal · ${fmtNum(it.p)}g P · ${fmtNum(it.na)}mg Na</div>
+          </div>
+          <div class="fi-qty">
+            <button class="qty-btn" onclick="stepFoodQty('${it.id}',-0.5)" aria-label="Less">−</button>
+            <span class="qty-val">${it.qty}</span>
+            <button class="qty-btn" onclick="stepFoodQty('${it.id}',0.5)" aria-label="More">+</button>
+          </div>
+          <button class="btn btn-ghost btn-sm btn-danger" onclick="removeFoodItem('${it.id}')"
+                  aria-label="Remove ${esc(it.name)}">×</button>
+        </div>`).join("")}
+    </div>`).join("");
+}
+
 // ── SETTINGS ──────────────────────────────────────────────────────────────
 
 function renderSettings() {
   const input = document.getElementById("sheets-url");
   if (input) input.value = sheetsUrl;
+  const secret = document.getElementById("sheets-secret");
+  if (secret) secret.value = sheetsSecret;
   updateQueueStatus();
 }
 
 function saveSettings() {
-  const input = document.getElementById("sheets-url");
-  sheetsUrl   = (input?.value || "").trim();
+  const input  = document.getElementById("sheets-url");
+  const secret = document.getElementById("sheets-secret");
+  sheetsUrl    = (input?.value  || "").trim();
+  sheetsSecret = (secret?.value || "").trim();
   persist();
   setSyncStatus(sheetsUrl ? "none" : "", sheetsUrl ? "Ready" : "");
   showToast("Settings saved");
@@ -1018,13 +1364,15 @@ function saveSettings() {
 
 async function testConnection() {
   const url = document.getElementById("sheets-url")?.value?.trim();
+  const key = document.getElementById("sheets-secret")?.value?.trim();
   if (!url) { showToast("Enter a URL first"); return; }
   showToast("Testing…");
   try {
+    const body = key ? { _test: true, _key: key } : { _test: true };
     const res  = await fetch(url, {
       method:  "POST",
       headers: { "Content-Type": "text/plain" },
-      body:    JSON.stringify({ _test: true }),
+      body:    JSON.stringify(body),
     });
     const json = await res.json();
     showToast(json.status === "ok" ? "Connection successful ✓" : `Error: ${json.message}`);
@@ -1036,16 +1384,19 @@ async function testConnection() {
 function updateQueueStatus() {
   const el = document.getElementById("queue-status");
   if (!el) return;
-  el.textContent = syncQueue.length
-    ? `${syncQueue.length} workout(s) pending sync.`
-    : "Queue is empty — all workouts synced.";
+  const parts = [];
+  if (syncQueue.length) parts.push(`${syncQueue.length} workout(s)`);
+  if (foodQueue.length) parts.push(`${foodQueue.length} food day(s)`);
+  el.textContent = parts.length
+    ? `${parts.join(" and ")} pending sync.`
+    : "Queue is empty — everything synced.";
 }
 
 // ── EXPORT / IMPORT ───────────────────────────────────────────────────────
 
 function exportData() {
   const blob = new Blob(
-    [JSON.stringify({ workouts, weightLog, exportedAt: new Date().toISOString() }, null, 2)],
+    [JSON.stringify({ workouts, weightLog, nutrition, exportedAt: new Date().toISOString() }, null, 2)],
     { type: "application/json" }
   );
   const a    = document.createElement("a");
@@ -1068,11 +1419,14 @@ function handleImport(input) {
       const parsed   = JSON.parse(e.target.result);
       const importedWorkouts = parsed.workouts ?? (Array.isArray(parsed) ? parsed : null);
       const importedWeight   = Array.isArray(parsed.weightLog) ? parsed.weightLog : [];
+      const importedFood     = Array.isArray(parsed.nutrition) ? parsed.nutrition : [];
       if (!importedWorkouts) throw new Error("Invalid format");
-      const totalItems = importedWorkouts.length + importedWeight.length;
+      const importedFoodDays = [...new Set(importedFood.map(i => i.date))];
+      const totalItems = importedWorkouts.length + importedWeight.length + importedFood.length;
       showConfirm(
         "Import data?",
-        `This will merge ${importedWorkouts.length} workout(s) and ${importedWeight.length} weight entry(ies) into your existing data.`,
+        `This will merge ${importedWorkouts.length} workout(s), ${importedWeight.length} weight entry(ies) `
+        + `and ${importedFood.length} food item(s) across ${importedFoodDays.length} day(s) into your existing data.`,
         () => {
           const newWorkouts = [];
           importedWorkouts.forEach(entry => {
@@ -1092,10 +1446,32 @@ function handleImport(input) {
           });
           weightLog.sort((a, b) => a.date.localeCompare(b.date));
 
+          // Food merges a whole day at a time — a partially-imported day would
+          // be worse than none, since the Sheets write replaces the date.
+          const existingFoodDays = new Set(nutrition.map(i => i.date));
+          const newFoodDays = importedFoodDays.filter(d => !existingFoodDays.has(d));
+          newFoodDays.forEach(date => {
+            importedFood
+              .filter(i => i.date === date)
+              .forEach(i => nutrition.push({ ...i, id: i.id || newFoodId() }));
+          });
+
           persist();
           showToast(`Imported ${totalItems} item(s)`);
           newWorkouts.forEach(entry => syncToSheets(entry));
           newWeightEntries.forEach(entry => syncWeightToSheets(entry));
+          newFoodDays.forEach(date => {
+            const items = foodItemsFor(date);
+            syncFoodToSheets({
+              _type: "food", date, savedAt: new Date().toISOString(),
+              items: items.map(it => ({
+                meal: it.meal, key: it.key, name: it.name, qty: it.qty,
+                cal: it.cal, p: it.p, c: it.c, fib: it.fib,
+                fat: it.fat, sat: it.sat, na: it.na,
+                source: it.source, conf: it.conf,
+              })),
+            });
+          });
         },
         "Import"
       );
@@ -1188,9 +1564,12 @@ loadFromStorage();
 initTheme();
 pruneDrafts();
 
-currentLogDate = todayISO();
+currentLogDate  = todayISO();
+currentFoodDate = currentLogDate;
 document.getElementById("workout-date").value = currentLogDate;
 document.getElementById("weight-date").value   = currentLogDate;
+document.getElementById("food-date").value     = currentFoodDate;
+document.getElementById("food-meal").value     = defaultMeal();
 loadDraftOrWorkout(currentLogDate);
 
 updateQueueStatus();
@@ -1205,6 +1584,15 @@ document.getElementById("workout-date").addEventListener("change", e => {
   saveDraft(currentLogDate);
   currentLogDate = e.target.value;
   loadDraftOrWorkout(currentLogDate);
+});
+
+document.getElementById("food-date").addEventListener("change", e => {
+  currentFoodDate = e.target.value;
+  renderFoodTab();
+});
+
+document.getElementById("food-search").addEventListener("input", e => {
+  onFoodSearch(e.target.value);
 });
 
 // Fetch latest data from Sheets in the background — app is usable immediately

@@ -39,6 +39,7 @@
     <div class="tabs" role="tablist" aria-label="App sections">
       <button class="tab active" role="tab" id="tab-log"      onclick="switchTab('log')">Log</button>
       <button class="tab"        role="tab" id="tab-weight"   onclick="switchTab('weight')">Weight</button>
+      <button class="tab"        role="tab" id="tab-food"     onclick="switchTab('food')">Food</button>
       <button class="tab"        role="tab" id="tab-history"  onclick="switchTab('history')">History</button>
       <button class="tab"        role="tab" id="tab-progress" onclick="switchTab('progress')">Progress</button>
       <button class="tab"        role="tab" id="tab-settings" onclick="switchTab('settings')">Settings</button>
@@ -85,6 +86,74 @@
       <div id="weight-log-list"></div>
     </section>
 
+    <!-- FOOD -->
+    <section class="tab-panel" id="panel-food" aria-labelledby="tab-food">
+      <div class="date-row">
+        <h2 class="section-heading">Food</h2>
+        <div class="date-right">
+          <label class="date-label" for="food-date">Date</label>
+          <input class="date-input" type="date" id="food-date" />
+        </div>
+      </div>
+
+      <div id="food-totals"></div>
+
+      <div class="food-add">
+        <div class="food-search-row">
+          <input class="text-input" type="text" id="food-search" autocomplete="off"
+            placeholder="Search foods…" aria-label="Search the food database" />
+          <select class="select-input" id="food-meal" aria-label="Meal">
+            <option value="Pre">Pre</option>
+            <option value="Post">Post</option>
+            <option value="Breakfast">Breakfast</option>
+            <option value="Lunch">Lunch</option>
+            <option value="Snack">Snack</option>
+            <option value="Dinner">Dinner</option>
+          </select>
+        </div>
+        <div class="food-results" id="food-results"></div>
+      </div>
+
+      <div class="food-custom" id="food-custom" hidden>
+        <div class="food-custom-title">Custom item — not in the database</div>
+        <input class="text-input" type="text" id="cf-name" placeholder="Name (e.g. cafeteria chicken bowl)" />
+        <div class="food-custom-grid">
+          <label>Cal<input class="num-input" type="number" id="cf-cal" inputmode="numeric" /></label>
+          <label>P<input class="num-input" type="number" id="cf-p" inputmode="numeric" /></label>
+          <label>C<input class="num-input" type="number" id="cf-c" inputmode="numeric" /></label>
+          <label>Fib<input class="num-input" type="number" id="cf-fib" inputmode="numeric" /></label>
+          <label>Fat<input class="num-input" type="number" id="cf-fat" inputmode="numeric" /></label>
+          <label>Sat<input class="num-input" type="number" id="cf-sat" inputmode="numeric" /></label>
+          <label>Na<input class="num-input" type="number" id="cf-na" inputmode="numeric" /></label>
+          <label>Conf
+            <select class="select-input" id="cf-conf">
+              <option value="high">high</option>
+              <option value="med" selected>med</option>
+              <option value="low">low</option>
+            </select>
+          </label>
+        </div>
+        <div class="field-row">
+          <button class="btn btn-primary btn-sm" onclick="addCustomFood()">Add item</button>
+          <button class="btn btn-ghost btn-sm" onclick="toggleCustomFood(false)">Cancel</button>
+        </div>
+      </div>
+
+      <div id="food-items"></div>
+
+      <div class="save-row">
+        <button class="btn btn-ghost" onclick="toggleCustomFood(true)">Custom item</button>
+        <button class="btn btn-primary" id="food-save-btn" onclick="saveFoodDay()">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+            <polyline points="17 21 17 13 7 13 7 21"/>
+            <polyline points="7 3 7 8 15 8"/>
+          </svg>
+          Save Day
+        </button>
+      </div>
+    </section>
+
     <!-- HISTORY -->
     <section class="tab-panel" id="panel-history" aria-labelledby="tab-history">
       <div class="panel-header">
@@ -118,6 +187,11 @@
           <label class="field-label" for="sheets-url">Deployment URL</label>
           <input class="text-input" type="url" id="sheets-url"
             placeholder="https://script.google.com/macros/s/…/exec" />
+        </div>
+        <div class="field-row">
+          <label class="field-label" for="sheets-secret">Shared secret <span class="field-optional">(optional)</span></label>
+          <input class="text-input" type="password" id="sheets-secret" autocomplete="off"
+            placeholder="Leave blank unless SECRET is set in appsscript.js" />
         </div>
         <div class="field-row">
           <button class="btn btn-primary" onclick="saveSettings()">Save</button>

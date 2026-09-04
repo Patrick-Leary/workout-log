@@ -10,7 +10,8 @@ A lightweight, mobile-friendly workout tracker that runs entirely in your browse
 
 ## Features
 
-- **Log workouts** — track sets, reps, and weight for 6 exercises (Leg Press, Chest Press, Pull-Ups, Overhead Press, Dumbbell Rows, Bicep Curls)
+- **Log workouts** — track sets, reps, and weight for gym and home/dumbbell exercises
+- **Log food** — search a personal food database, tap to add, adjust servings, and watch the day's calorie and protein totals against your targets
 - **Last session reference** — automatically shows your best weight/reps from the previous session as a guide
 - **History** — browse every past workout with a collapsible set-by-set breakdown
 - **Progress tracking** — all-time personal bests, session count, and streak counter per exercise
@@ -50,13 +51,44 @@ Connect the app to a Google Sheet for two-way sync. On every app load the latest
 
 > **Tip:** Format column A as **Plain text** (Format → Number → Plain text) to prevent Sheets from converting dates automatically.
 
+The app creates the **Weight** and **Nutrition** tabs itself on first save. To use
+the Food tab you also need a **Foods** tab, which you fill in yourself — it is the
+food database the picker searches, and nothing in the app writes to it:
+
+| A | B | C | D | E | F | G | H | I | J | K | L |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Key | Name | Brand | Serving | Cal | P | C | Fib | Fat | Sat | Na | Verified |
+
+- **Key** — a stable slug (`olipop-cherry`). Logged rows reference it, so renaming
+  a food is safe but changing its key orphans history.
+- **Serving** — free text describing one unit (`1 bottle (500mL)`). Quantities in
+  the app are multiples of this.
+- **Verified** — `yes` if the numbers came off the physical label. Anything else
+  is treated as an estimate and tagged as such on every row it produces, which is
+  how you spot a number that was guessed once and then quietly reused.
+
+Flavour variants get their own row. Brands vary more between flavours than people
+expect, and averaging them silently corrupts the log.
+
+The **Nutrition** tab is item-level — one row per food, not per day. Day totals are
+a pivot or a `QUERY` away; going the other direction is impossible.
+
 ### 2. Create the Apps Script
 
 1. In your Sheet, click **Extensions → Apps Script**
 2. Delete all default code and paste the contents of [`appsscript.js`](appsscript.js) from this repo
 3. Click **Save** and give the project any name (e.g. "Lift Log Sync")
 
-### 3. Deploy as a Web App
+### 3. (Optional) Require a shared secret
+
+The endpoint is public by default — anyone with the URL can read and write. To lock
+it down, set `SECRET` at the top of `appsscript.js` to a long random string and enter
+the same value in the app's **Settings → Shared secret** field.
+
+> Deploy with `SECRET` blank first and confirm syncing still works, **then** set it.
+> Turning it on immediately stops every device that hasn't had the secret entered.
+
+### 4. Deploy as a Web App
 
 1. Click **Deploy → New deployment**
 2. Click the ⚙️ gear icon next to "Type" and select **Web app**
@@ -67,7 +99,7 @@ Connect the app to a Google Sheet for two-way sync. On every app load the latest
 5. Copy the deployment URL — it looks like:
    `https://script.google.com/macros/s/AKfycbx.../exec`
 
-### 4. Connect in the App
+### 5. Connect in the App
 
 1. Open the app and go to the **Settings** tab
 2. Paste the URL into the **Deployment URL** field
