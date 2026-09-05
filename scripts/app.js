@@ -5,28 +5,180 @@
 
 // ── CONFIG ────────────────────────────────────────────────────────────────
 
+// Muscle groups. Order drives the Progress tiles.
+const GROUPS = ["Chest", "Back", "Legs", "Shoulders", "Arms", "Core"];
+
+// The five lifts the headline rank is built from. Isolation and machine work
+// still gets its own per-exercise rank, but must not inflate the overall.
+const BIG_FIVE = ["bench", "squat", "ohpress", "rows", "latpulldown"];
+
+// Exercise catalogue — matches the building gym downstairs (2026-09-05).
+//   group     which muscle-group tile it feeds
+//   weight    1.0 compound · 0.75 machine · 0.5 isolation (group-score weighting)
+//   variants  first entry is the default; `std` maps variant -> STANDARDS key
+//   perSide   reps are per side; `perHand` weight entered is per dumbbell
 const EXERCISES = [
-  { id: "legpress",   name: "Leg Press",        tag: "Legs",      defaultSets: 3, repRange: [10, 12], weighted: true  },
-  { id: "chestpress", name: "Chest Press",       tag: "Chest",     defaultSets: 3, repRange: [10, 12], weighted: true  },
-  { id: "pullups",    name: "Pull-Ups",          tag: "Back",      defaultSets: 3, repRange: null,     weighted: false, amrap: true },
-  { id: "ohpress",    name: "Overhead Press",    tag: "Shoulders", defaultSets: 3, repRange: [10, 12], weighted: true  },
-  { id: "rows",       name: "Dumbbell Rows",     tag: "Back",      defaultSets: 3, repRange: [10, 12], weighted: true,  perSide: true },
-  { id: "curls",      name: "Bicep Curls",       tag: "Arms",      defaultSets: 2, repRange: [12, 15], weighted: true  },
-  // Home / dumbbell block — no gym required
-  { id: "pushups",    name: "Push-Ups",          tag: "Chest",     defaultSets: 3, repRange: null,     weighted: false, amrap: true },
-  { id: "squat",      name: "Squat",             tag: "Legs",      defaultSets: 3, repRange: [10, 15], weighted: true,  hint: "enter 0 for bodyweight" },
-  { id: "splitsquat", name: "Split Squat",       tag: "Legs",      defaultSets: 3, repRange: [8, 10],  weighted: true,  perSide: true, hint: "per leg · enter 0 for bodyweight" },
-  { id: "rdl",        name: "Romanian Deadlift", tag: "Legs",      defaultSets: 3, repRange: [10, 12], weighted: true  },
-  { id: "latraise",   name: "Lateral Raise",     tag: "Shoulders", defaultSets: 3, repRange: [10, 12], weighted: true  },
-  { id: "hammercurl", name: "Hammer Curl",       tag: "Arms",      defaultSets: 3, repRange: [10, 15], weighted: true  },
+  // ── Chest ───────────────────────────────────────────────────────────────
+  { id: "bench",       name: "Bench Press",       group: "Chest",     defaultSets: 3, repRange: [5, 10],  weighted: true,  weight: 1.0,
+    variants: ["Barbell", "Dumbbell", "Smith"], std: { Barbell: "bench-bb" } },
+  { id: "pushups",     name: "Push-Ups",          group: "Chest",     defaultSets: 3, repRange: null,     weighted: false, weight: 0.75, amrap: true,
+    variants: ["Bodyweight"], std: { Bodyweight: "pushups" } },
+  { id: "dips",        name: "Dips",              group: "Chest",     defaultSets: 3, repRange: null,     weighted: false, weight: 1.0, amrap: true,
+    variants: ["Bodyweight", "Weighted"], std: {} },
+
+  // ── Back ────────────────────────────────────────────────────────────────
+  { id: "pullups",     name: "Pull-Ups",          group: "Back",      defaultSets: 3, repRange: null,     weighted: false, weight: 1.0, amrap: true,
+    variants: ["Bodyweight", "Weighted"], std: { Bodyweight: "pullups" } },
+  { id: "latpulldown", name: "Lat Pulldown",      group: "Back",      defaultSets: 3, repRange: [8, 12],  weighted: true,  weight: 1.0,
+    variants: ["Cable"], std: { Cable: "latpulldown" } },
+  { id: "seatedrow",   name: "Seated Row",        group: "Back",      defaultSets: 3, repRange: [8, 12],  weighted: true,  weight: 0.75,
+    variants: ["Cable"], std: { Cable: "seatedrow" } },
+  { id: "rows",        name: "Dumbbell Rows",      group: "Back",      defaultSets: 3, repRange: [8, 12],  weighted: true,  weight: 1.0, perSide: true, perHand: true,
+    variants: ["Dumbbell", "Barbell"], std: { Dumbbell: "row-db" } },
+
+  // ── Legs ────────────────────────────────────────────────────────────────
+  { id: "squat",       name: "Squat",             group: "Legs",      defaultSets: 3, repRange: [5, 10],  weighted: true,  weight: 1.0,
+    variants: ["Barbell", "Smith", "Dumbbell", "Bodyweight"], std: { Barbell: "squat-bb" },
+    hint: "enter 0 for bodyweight" },
+  { id: "legpress",    name: "Leg Press",         group: "Legs",      defaultSets: 3, repRange: [10, 12], weighted: true,  weight: 0.75,
+    variants: ["Machine"], std: { Machine: "legpress" } },
+  { id: "rdl",         name: "Romanian Deadlift", group: "Legs",      defaultSets: 3, repRange: [8, 12],  weighted: true,  weight: 1.0, perHand: true,
+    variants: ["Dumbbell", "Barbell"], std: { Dumbbell: "rdl-db" } },
+  { id: "splitsquat",  name: "Split Squat",       group: "Legs",      defaultSets: 3, repRange: [8, 10],  weighted: true,  weight: 1.0, perSide: true,
+    variants: ["Dumbbell", "Bodyweight"], std: {},
+    hint: "per leg · enter 0 for bodyweight" },
+
+  // ── Shoulders ───────────────────────────────────────────────────────────
+  { id: "ohpress",     name: "Overhead Press",    group: "Shoulders", defaultSets: 3, repRange: [5, 10],  weighted: true,  weight: 1.0,
+    variants: ["Barbell", "Dumbbell"], std: { Barbell: "ohp-bb", Dumbbell: "ohp-db" } },
+  { id: "latraise",    name: "Lateral Raise",     group: "Shoulders", defaultSets: 3, repRange: [10, 12], weighted: true,  weight: 0.5, perHand: true,
+    variants: ["Dumbbell seated", "Dumbbell standing", "Cable"],
+    std: { "Dumbbell seated": "latraise-db", "Dumbbell standing": "latraise-db", Cable: "latraise-db" } },
+
+  // ── Arms ────────────────────────────────────────────────────────────────
+  { id: "curls",       name: "Bicep Curls",       group: "Arms",      defaultSets: 3, repRange: [10, 15], weighted: true,  weight: 0.5, perHand: true,
+    variants: ["Dumbbell", "Barbell", "Cable"], std: { Dumbbell: "curl-db" } },
+  { id: "hammercurl",  name: "Hammer Curl",       group: "Arms",      defaultSets: 3, repRange: [10, 15], weighted: true,  weight: 0.5, perHand: true,
+    variants: ["Dumbbell"], std: { Dumbbell: "hammercurl-db" } },
+  { id: "triceppd",    name: "Tricep Pulldown",   group: "Arms",      defaultSets: 3, repRange: [10, 15], weighted: true,  weight: 0.5,
+    variants: ["Cable"], std: {} },
+
+  // ── Core ────────────────────────────────────────────────────────────────
+  { id: "legraise",    name: "Leg Raise",         group: "Core",      defaultSets: 3, repRange: null,     weighted: false, weight: 0.5, amrap: true,
+    variants: ["Hanging", "Captain's chair"], std: {} },
+  { id: "situps",      name: "Sit-Ups",           group: "Core",      defaultSets: 3, repRange: null,     weighted: false, weight: 0.5, amrap: true,
+    variants: ["Bodyweight"], std: {} },
+
+  // ── Legacy ──────────────────────────────────────────────────────────────
+  // No longer in the picker (the gym has no chest press machine), but kept so
+  // the May 2026 history stays visible in History and Progress.
+  { id: "chestpress",  name: "Chest Press",       group: "Chest",     defaultSets: 3, repRange: [10, 12], weighted: true,  weight: 0.75, legacy: true,
+    variants: ["Machine"], std: {} },
 ];
+
+// What the "+ Add Exercise" picker offers.
+const ACTIVE_EXERCISES = EXERCISES.filter(e => !e.legacy);
+
+/* ── STRENGTH STANDARDS ───────────────────────────────────────────────────
+   Source: Strength Level, male, at a 130 lb REFERENCE bodyweight.
+   Values are 1RM in lb per the exercise's own convention (per dumbbell where
+   the lift is loaded per hand); `reps` kinds are rep counts, not weight.
+
+   ⚠️ These are percentiles of *people who log lifts on Strength Level* — a
+   self-selected, committed population. "50th percentile" is well above the
+   50th percentile of men generally. Labelled as such in the UI.
+
+   Bodyweight scaling: thresholds move allometrically, (bw/130)^0.67, so the
+   ladder measures strength PER POUND. Bulking raises the bar — deliberately:
+   if rank stalls while the scale climbs, the surplus isn't becoming muscle.
+   Rep-based standards are NOT scaled (no published curve to fit) — they are
+   compared at the 130 lb reference. Known limitation.                        */
+const STD_REF_BW  = 130;
+const PCT_ANCHORS = [5, 20, 50, 80, 95];
+const Z_ANCHORS   = [-1.6449, -0.8416, 0, 0.8416, 1.6449];
+
+const STANDARDS = {
+  "squat-bb":       { kind: "weight", v: [106, 153, 211, 279, 352] },
+  "bench-bb":       { kind: "weight", v: [ 80, 114, 156, 205, 258] },
+  "ohp-bb":         { kind: "weight", v: [ 45,  68,  98, 133, 172] },
+  "ohp-db":         { kind: "weight", v: [ 20,  33,  50,  70,  93] },
+  "row-db":         { kind: "weight", v: [ 26,  44,  69,  99, 133] },
+  "rdl-db":         { kind: "weight", v: [ 26,  46,  72, 105, 141] },
+  "curl-db":        { kind: "weight", v: [ 12,  23,  38,  57,  79] },
+  "hammercurl-db":  { kind: "weight", v: [ 15,  25,  39,  56,  75] },
+  "latraise-db":    { kind: "weight", v: [  7,  16,  28,  45,  64] },
+  "legpress":       { kind: "weight", v: [152, 248, 373, 525, 694] },
+  "latpulldown":    { kind: "weight", v: [ 77, 109, 150, 196, 246] },
+  "seatedrow":      { kind: "weight", v: [ 72, 105, 147, 197, 250] },
+  "pushups":        { kind: "reps",   v: [  3,  19,  41,  67,  96] },
+  "pullups":        { kind: "reps",   v: [  1,   7,  14,  23,  33] },
+};
+
+// Patrick's ladder (2026-09-05). Evenly spaced percentile bands — Champion at
+// 80 lands exactly on Strength Level's "Advanced".
+const TIERS = [
+  { name: "Bronze",   lo:  0, hi: 10 },
+  { name: "Silver",   lo: 10, hi: 25 },
+  { name: "Gold",     lo: 25, hi: 40 },
+  { name: "Platinum", lo: 40, hi: 60 },
+  { name: "Diamond",  lo: 60, hi: 80 },
+  { name: "Champion", lo: 80, hi: 100 },
+];
+
+// Upkeep decay. NOT a strength measurement — the detraining literature says
+// strength holds for 2-4 weeks and only drops meaningfully past ~4. This is a
+// deliberate house rule for motivation, labelled as one in the UI. Training the
+// group replaces the estimate with a real measurement and restores it at once.
+const DECAY = { graceDays: 7, daysPerDivision: 5, maxTiersLost: 1 };
 
 // Nutrition targets — from the lean-bulk plan. 2,650 is the target and 2,500
 // the floor; protein has a band rather than a single number.
 const FOOD_TARGETS = { cal: 2650, calFloor: 2500, proteinMin: 150, proteinMax: 190 };
 
-const MEALS       = ["Breakfast", "Lunch", "Snack", "Dinner"];
-const FOOD_MACROS = ["cal", "p", "c", "fib", "fat", "sat", "na"];
+const MEALS = ["Breakfast", "Lunch", "Snack", "Dinner"];
+
+/* ── NUTRIENTS ────────────────────────────────────────────────────────────
+   key   column key in Foods/Nutrition and on the item objects
+   dv    FDA Daily Value (the label standard, so app numbers match packages)
+   src   where the data realistically comes from, surfaced as a reliability
+         badge: "label" = on every US Nutrition Facts panel since 2016,
+         "usda"  = voluntary on labels, looked up, "est" = wide error bars
+   goal  "hit"  meet or exceed the DV
+         "cap"  stay under (sodium, sat fat, added sugar)
+   Blank is NOT zero. Day totals carry a coverage % — the share of the day's
+   calories that came from items actually carrying a value for that nutrient —
+   so a half-filled column reads as "53% covered", never as a deficiency.       */
+const NUTRIENTS = [
+  { key: "cal",    label: "Calories",      unit: "",    dv: 2650, src: "label", goal: "hit",  core: true },
+  { key: "p",      label: "Protein",       unit: "g",   dv: 150,  src: "label", goal: "hit",  core: true },
+  { key: "c",      label: "Carbs",         unit: "g",   dv: 275,  src: "label", goal: null,   core: true },
+  { key: "fib",    label: "Fiber",         unit: "g",   dv: 28,   src: "label", goal: "hit",  core: true },
+  { key: "fat",    label: "Fat",           unit: "g",   dv: 78,   src: "label", goal: null,   core: true },
+  { key: "sat",    label: "Sat fat",       unit: "g",   dv: 20,   src: "label", goal: "cap",  core: true },
+  { key: "na",     label: "Sodium",        unit: "mg",  dv: 2300, src: "label", goal: "cap",  core: true, target: 2750 },
+  { key: "trans",  label: "Trans fat",     unit: "g",   dv: 0,    src: "label", goal: "cap"  },
+  { key: "chol",   label: "Cholesterol",   unit: "mg",  dv: 300,  src: "label", goal: "cap"  },
+  { key: "sugar",  label: "Total sugars",  unit: "g",   dv: 0,    src: "label", goal: null   },
+  { key: "addsug", label: "Added sugars",  unit: "g",   dv: 50,   src: "label", goal: "cap"  },
+  { key: "vitd",   label: "Vitamin D",     unit: "mcg", dv: 20,   src: "label", goal: "hit"  },
+  { key: "ca",     label: "Calcium",       unit: "mg",  dv: 1300, src: "label", goal: "hit"  },
+  { key: "fe",     label: "Iron",          unit: "mg",  dv: 18,   src: "label", goal: "hit"  },
+  { key: "k",      label: "Potassium",     unit: "mg",  dv: 4700, src: "label", goal: "hit"  },
+  { key: "vita",   label: "Vitamin A",     unit: "mcg", dv: 900,  src: "usda",  goal: "hit"  },
+  { key: "vitc",   label: "Vitamin C",     unit: "mg",  dv: 90,   src: "usda",  goal: "hit"  },
+  { key: "vite",   label: "Vitamin E",     unit: "mg",  dv: 15,   src: "usda",  goal: "hit"  },
+  { key: "vitk",   label: "Vitamin K",     unit: "mcg", dv: 120,  src: "usda",  goal: "hit"  },
+  { key: "b6",     label: "Vitamin B6",    unit: "mg",  dv: 1.7,  src: "usda",  goal: "hit"  },
+  { key: "b12",    label: "Vitamin B12",   unit: "mcg", dv: 2.4,  src: "usda",  goal: "hit"  },
+  { key: "folate", label: "Folate",        unit: "mcg", dv: 400,  src: "usda",  goal: "hit"  },
+  { key: "mg",     label: "Magnesium",     unit: "mg",  dv: 420,  src: "usda",  goal: "hit"  },
+  { key: "zn",     label: "Zinc",          unit: "mg",  dv: 11,   src: "usda",  goal: "hit"  },
+];
+
+// Every numeric nutrient column, in sheet order.
+const FOOD_MACROS = NUTRIENTS.map(n => n.key);
+// The seven that existed before 2026-09-05 and drive the headline readout.
+const CORE_MACROS = NUTRIENTS.filter(n => n.core).map(n => n.key);
 
 // ── EXERCISE HELPERS ──────────────────────────────────────────────────────
 
@@ -42,7 +194,13 @@ function numOrNull(v) {
 // Sub-label under the exercise name. Explicit `hint` wins; `perSide` is the
 // legacy shorthand for "per side".
 function exerciseHint(ex) {
-  return ex.hint ?? (ex.perSide ? "per side" : null);
+  if (ex.hint) return ex.hint;
+  // `perHand` matters for ranking: the strength standards for dumbbell lifts
+  // are quoted per dumbbell, so the number entered has to be per dumbbell too.
+  if (ex.perHand && ex.perSide) return "per side · weight per dumbbell";
+  if (ex.perHand)               return "weight per dumbbell";
+  if (ex.perSide)               return "per side";
+  return null;
 }
 
 // ── STATE ─────────────────────────────────────────────────────────────────
@@ -63,6 +221,7 @@ let foodQuery      = "";
 let foodDirty      = [];   // dates with local edits not yet accepted by Sheets
 let lastFoodResults = [];  // what the picker is currently showing
 let weightLookback = null; // null = all time
+let weightGoal     = "gain";  // gain | maintain | lose — drives the trend colours
 let logDrafts      = {};   // { [dateISO]: exercises[] }
 let currentLogDate = "";
 let isLoadingForm  = false;
@@ -81,6 +240,7 @@ function loadFromStorage() {
     foodQueue  = JSON.parse(localStorage.getItem("ll_food_queue") || "[]");
     foodDirty  = JSON.parse(localStorage.getItem("ll_food_dirty") || "[]");
     sheetsSecret = localStorage.getItem("ll_sheets_secret")       || "";
+    weightGoal   = localStorage.getItem("ll_weight_goal")         || "gain";
   } catch (e) {
     console.warn("Could not read localStorage:", e);
   }
@@ -97,6 +257,7 @@ function persist() {
     localStorage.setItem("ll_food_queue", JSON.stringify(foodQueue));
     localStorage.setItem("ll_food_dirty", JSON.stringify(foodDirty));
     localStorage.setItem("ll_sheets_secret", sheetsSecret);
+    localStorage.setItem("ll_weight_goal", weightGoal);
   } catch (e) {
     console.warn("Could not write localStorage:", e);
   }
@@ -139,7 +300,7 @@ function loadDraftOrWorkout(date) {
     ?? null;
   isLoadingForm = true;
   initLogPanel();
-  if (source) source.forEach(ex => addExerciseToLog(ex.id, ex.sets));
+  if (source) source.forEach(ex => addExerciseToLog(ex.id, ex.sets, ex.variant));
   isLoadingForm = false;
   updateSaveButton(date);
 }
@@ -222,16 +383,45 @@ function formatDate(iso) {
 
 // ── LAST BEST ─────────────────────────────────────────────────────────────
 
-function getLastBest(exerciseId) {
+// Last session's best set. Variant-scoped when one is given, because comparing
+// a seated lateral raise to a standing one produces a "regression" that isn't.
+function getLastBest(exerciseId, variant) {
   for (let i = 0; i < workouts.length; i++) {
-    const ex = workouts[i].exercises.find(e => e.id === exerciseId);
-    if (!ex) continue;
-    const done = ex.sets.filter(s => s.reps != null);
-    if (!done.length) continue;
-    return done.reduce((best, s) =>
-      (s.weight ?? 0) >= (best.weight ?? 0) ? s : best, done[0]);
+    const matches = workouts[i].exercises.filter(e =>
+      e.id === exerciseId && (!variant || !e.variant || e.variant === variant));
+    for (const ex of matches) {
+      const done = ex.sets.filter(s => s.reps != null);
+      if (!done.length) continue;
+      return done.reduce((best, s) =>
+        (s.weight ?? 0) >= (best.weight ?? 0) ? s : best, done[0]);
+    }
   }
   return null;
+}
+
+// Which variant to preselect: whatever was used last, else the first listed.
+function lastVariantFor(exId) {
+  const ex = EXERCISES.find(e => e.id === exId);
+  const fallback = ex && ex.variants ? ex.variants[0] : "";
+  for (let i = 0; i < workouts.length; i++) {
+    const logged = workouts[i].exercises.find(e => e.id === exId);
+    if (logged && logged.variant) return logged.variant;
+  }
+  return fallback;
+}
+
+// Refresh the "Last: …" hint when the variant dropdown changes, so the target
+// on screen is always the one for the variant actually selected.
+function onVariantChange(exId) {
+  const sel   = document.getElementById(`variant-${exId}`);
+  const label = document.querySelector(`.exercise-block[data-exid="${exId}"] .prev-best`);
+  if (!sel || !label) return;
+  const ex   = EXERCISES.find(e => e.id === exId);
+  const best = getLastBest(exId, sel.value);
+  label.textContent = best
+    ? (ex.weighted ? `Last: ${best.weight ?? "–"}lb × ${best.reps}` : `Last: ${best.reps} reps`)
+    : "First session";
+  saveDraft(currentLogDate);
 }
 
 // ── LOG PANEL ─────────────────────────────────────────────────────────────
@@ -245,7 +435,7 @@ function initLogPanel() {
 }
 
 function updateAddExerciseBtn() {
-  const available = EXERCISES.filter(ex => !addedExercises.includes(ex.id));
+  const available = ACTIVE_EXERCISES.filter(ex => !addedExercises.includes(ex.id));
   const row       = document.getElementById("add-exercise-row");
   if (!available.length) { row.innerHTML = ""; return; }
 
@@ -266,26 +456,35 @@ function toggleExercisePicker(e) {
   document.getElementById("exercise-picker")?.classList.toggle("open", pickerOpen);
 }
 
-function addExerciseToLog(exId, prefilledSets = null) {
+function addExerciseToLog(exId, prefilledSets = null, prefilledVariant = null) {
   if (addedExercises.includes(exId)) return;
   addedExercises.push(exId);
   pickerOpen = false;
 
   const ex        = EXERCISES.find(e => e.id === exId);
   const container = document.getElementById("exercises-container");
-  const best      = getLastBest(ex.id);
+  const variant   = prefilledVariant || lastVariantFor(exId);
+  const best      = getLastBest(ex.id, variant);
   const prevText  = best
     ? (ex.weighted ? `Last: ${best.weight ?? "–"}lb × ${best.reps}` : `Last: ${best.reps} reps`)
     : "First session";
+  const variantSel = ex.variants && ex.variants.length > 1
+    ? `<select class="select-input variant-select" id="variant-${ex.id}"
+               aria-label="${ex.name} variant" onchange="onVariantChange('${ex.id}')">
+         ${ex.variants.map(v =>
+           `<option value="${v}"${v === variant ? " selected" : ""}>${v}</option>`).join("")}
+       </select>`
+    : `<input type="hidden" id="variant-${ex.id}" value="${ex.variants ? ex.variants[0] : ""}">`;
 
   const block = document.createElement("div");
   block.className    = "exercise-block";
   block.dataset.exid = ex.id;
   block.innerHTML    = `
     <div class="exercise-header">
-      <div>
+      <div class="exercise-title">
         <div class="exercise-name">${ex.name}</div>
         ${exerciseHint(ex) ? `<div class="exercise-hint">${exerciseHint(ex)}</div>` : ""}
+        ${variantSel}
       </div>
       <div style="display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap;justify-content:flex-end">
         <span class="prev-best">${prevText}</span>
@@ -380,7 +579,9 @@ function collectFormData() {
       }
       return { weight, reps };
     });
-    return { id: ex.id, name: ex.name, sets };
+    const variant = document.getElementById(`variant-${exId}`)?.value
+                 || (ex.variants ? ex.variants[0] : "");
+    return { id: ex.id, name: ex.name, variant, sets };
   });
 }
 
@@ -575,6 +776,13 @@ function setSyncStatus(state, label) {
     return;
   }
   el.innerHTML = `<span class="sync-dot ${state}"></span>${label}`;
+}
+
+function setWeightGoal(goal) {
+  weightGoal = goal;
+  persist();
+  renderProgress();
+  renderSettings();
 }
 
 // ── HISTORY ───────────────────────────────────────────────────────────────
@@ -789,11 +997,15 @@ function renderWeightTrendSection() {
   const filtered = getFilteredWeightLog();
   let statHtml = "";
   if (filtered.length >= 2) {
-    const diff = +(filtered[filtered.length - 1].weight - filtered[0].weight).toFixed(1);
-    const sign = diff > 0 ? "+" : "";
-    const cls  = diff < 0 ? "stat-down" : diff > 0 ? "stat-up" : "";
+    const diff  = +(filtered[filtered.length - 1].weight - filtered[0].weight).toFixed(1);
+    const sign  = diff > 0 ? "+" : "";
+    const days  = daysBetween(filtered[0].date, filtered[filtered.length - 1].date);
+    const rate  = days > 0 ? (diff / days) * 7 : 0;   // lb per week
+    const { cls, note } = weightVerdict(rate, filtered.length, days);
     statHtml = `<div class="weight-trend-stat">
       <span class="weight-stat-delta ${cls}">${sign}${diff} lbs</span> over this period
+      ${days >= 7 ? `<span class="weight-rate">${rate > 0 ? "+" : ""}${rate.toFixed(2)} lb/wk</span>` : ""}
+      ${note ? `<span class="weight-note">${note}</span>` : ""}
     </div>`;
   }
 
@@ -808,6 +1020,32 @@ function renderWeightTrendSection() {
     </div>`;
 
   renderWeightChart();
+}
+
+// Weight is judged against the GOAL, not against a built-in assumption that
+// down is good. On a lean bulk, gaining is the point — the old code painted
+// every gain with --color-warning and every loss with --color-success.
+//
+// And it is judged on RATE, not raw change: ~0.5 lb/wk is the target pace for a
+// lean beginner, >1 lb/wk means the surplus is outrunning what can be built.
+// Stays neutral until there is a week of data, because the first honest
+// average needs ~7 days and colouring noise teaches nothing.
+function weightVerdict(ratePerWeek, points, days) {
+  if (points < 3 || days < 7) return { cls: "", note: "too early to read" };
+
+  if (weightGoal === "gain") {
+    if (ratePerWeek >= 0.25 && ratePerWeek <= 1.0) return { cls: "stat-good", note: "on plan" };
+    if (ratePerWeek > 1.0)   return { cls: "stat-watch", note: "fast — likely not all tissue" };
+    return { cls: "stat-watch", note: "under target pace" };
+  }
+  if (weightGoal === "lose") {
+    if (ratePerWeek <= -0.25 && ratePerWeek >= -1.5) return { cls: "stat-good", note: "on plan" };
+    if (ratePerWeek < -1.5)  return { cls: "stat-watch", note: "fast" };
+    return { cls: "stat-watch", note: "under target pace" };
+  }
+  return Math.abs(ratePerWeek) <= 0.25
+    ? { cls: "stat-good",  note: "holding" }
+    : { cls: "stat-watch", note: "drifting" };
 }
 
 // Group weight entries into Mon–Sun weeks
@@ -933,6 +1171,228 @@ function renderWeightChart() {
     </svg>`;
 }
 
+// ── RANK ENGINE ───────────────────────────────────────────────────────────
+/* Logged set -> estimated 1RM -> population percentile -> tier + division.
+   See STANDARDS above for the data source and its caveats.                   */
+
+// Latest logged bodyweight. Standards are bodyweight-indexed, so this is what
+// makes the ladder a strength-PER-POUND measure.
+function currentBodyweight() {
+  if (!weightLog.length) return STD_REF_BW;
+  const latest = weightLog.slice().sort((a, b) => b.date.localeCompare(a.date))[0];
+  return Number(latest.weight) || STD_REF_BW;
+}
+
+// Epley. Linear in reps, fitted on 1-10 rep data — above ~12 the limiter stops
+// being max force and becomes endurance, so the estimate spreads badly
+// (15lb x 20: Epley 25.0, Brzycki 31.8). Anything over 12 reps is flagged.
+function epley(weight, reps) {
+  const w = Number(weight), r = Number(reps);
+  if (!Number.isFinite(w) || !Number.isFinite(r) || r < 1) return null;
+  return w * (1 + r / 30);
+}
+
+function e1rmConfidence(reps) {
+  return reps > 12 ? "low" : reps > 10 ? "med" : "high";
+}
+
+// Normal CDF — Abramowitz & Stegun 26.2.17.
+function normCdf(z) {
+  const b1 = 0.319381530, b2 = -0.356563782, b3 = 1.781477937,
+        b4 = -1.821255978, b5 = 1.330274429, p = 0.2316419;
+  const sign = z < 0 ? -1 : 1;
+  z = Math.abs(z);
+  const t = 1 / (1 + p * z);
+  const y = 1 - (((((b5 * t + b4) * t + b3) * t + b2) * t + b1) * t)
+            * Math.exp(-z * z / 2) / Math.sqrt(2 * Math.PI);
+  return sign === 1 ? y : 1 - y;
+}
+
+// Percentile for a value against a 5-anchor standards table. Strength in a
+// population is close to log-normal, so interpolate ln(value) against the
+// anchors' z-scores; that keeps the curve smooth between published points and
+// lets the tier bands sit at arbitrary percentiles rather than only at the
+// five Strength Level publishes.
+function percentileFor(value, std, bw) {
+  if (!std || !Number.isFinite(value) || value <= 0) return null;
+
+  // Weight standards scale allometrically with bodyweight; rep standards are
+  // left at the reference bodyweight (no published curve to fit).
+  const scale = std.kind === "weight" ? Math.pow(bw / STD_REF_BW, 0.67) : 1;
+  const t = std.v.map(v => v * scale);
+  const lv = Math.log(value);
+  const lt = t.map(Math.log);
+
+  let z;
+  if (lv <= lt[0]) {
+    // Below the first anchor — extrapolate on the first segment's slope.
+    const slope = (lt[1] - lt[0]) / (Z_ANCHORS[1] - Z_ANCHORS[0]);
+    z = Z_ANCHORS[0] + (lv - lt[0]) / slope;
+  } else if (lv >= lt[4]) {
+    const slope = (lt[4] - lt[3]) / (Z_ANCHORS[4] - Z_ANCHORS[3]);
+    z = Z_ANCHORS[4] + (lv - lt[4]) / slope;
+  } else {
+    let i = 0;
+    while (i < 3 && lv > lt[i + 1]) i++;
+    const frac = (lv - lt[i]) / (lt[i + 1] - lt[i]);
+    z = Z_ANCHORS[i] + frac * (Z_ANCHORS[i + 1] - Z_ANCHORS[i]);
+  }
+  return Math.max(0, Math.min(100, normCdf(z) * 100));
+}
+
+// Percentile -> continuous rung on a 0-6 scale (one unit per tier), plus the
+// display tier and division. Division 3 is the bottom third of a tier, 1 the
+// top, matching the ladder conventions people already know from games.
+function tierFromPct(pct) {
+  if (pct == null) return null;
+  let i = TIERS.findIndex(t => pct < t.hi);
+  if (i === -1) i = TIERS.length - 1;
+  const t = TIERS[i];
+  const frac = Math.max(0, Math.min(0.999, (pct - t.lo) / (t.hi - t.lo)));
+  return { tier: t.name, tierIndex: i, division: 3 - Math.floor(frac * 3), rung: i + frac };
+}
+
+function rungToTier(rung) {
+  const clamped = Math.max(0, Math.min(TIERS.length - 0.001, rung));
+  const i = Math.floor(clamped);
+  const frac = clamped - i;
+  return { tier: TIERS[i].name, tierIndex: i, division: 3 - Math.floor(frac * 3), rung: clamped };
+}
+
+function stdForExercise(ex, variant) {
+  const key = ex.std && ex.std[variant || (ex.variants && ex.variants[0])];
+  return key ? STANDARDS[key] : null;
+}
+
+// The value a set contributes: reps for bodyweight movements, e1RM otherwise.
+function setValue(ex, set) {
+  const reps = Number(set.reps);
+  if (!Number.isFinite(reps) || reps < 1) return null;
+  if (!ex.weighted) return reps;
+  const w = Number(set.weight);
+  if (!Number.isFinite(w) || w <= 0) return null;   // unloaded -> not rankable
+  return epley(w, reps);
+}
+
+// Best set PER VARIANT, plus which variant was trained most recently.
+//
+// Variants must not be pooled. The 2026-09-03 finding is the reason: standing
+// lateral raises at 15lb x 10 were momentum-assisted, and seated at 15lb x 8 is
+// the honest baseline. Pooling picks the standing set and reports a rank the
+// lift can't back up. Ranking per variant, and reporting the most RECENT one,
+// means switching to a stricter variant resets the baseline the way it should.
+function bestSetsByVariant(exId) {
+  const ex = EXERCISES.find(e => e.id === exId);
+  if (!ex) return null;
+  const byVariant = {};
+  let lastDate = null, lastVariant = null;
+
+  workouts.forEach(w => {
+    const logged = w.exercises.find(x => x.id === exId);
+    if (!logged) return;
+    const done = logged.sets.filter(s => s.reps != null);
+    if (!done.length) return;
+
+    const variant = logged.variant || (ex.variants && ex.variants[0]) || "";
+    if (!lastDate || w.date > lastDate) { lastDate = w.date; lastVariant = variant; }
+
+    done.forEach(s => {
+      const v = setValue(ex, s);
+      if (v == null) return;
+      const cur = byVariant[variant];
+      if (!cur || v > cur.value) {
+        byVariant[variant] = { value: v, date: w.date, reps: Number(s.reps),
+                               weight: s.weight, variant };
+      }
+    });
+  });
+
+  return lastDate ? { byVariant, lastDate, lastVariant } : null;
+}
+
+// Full rank for one exercise, peak preserved separately from the decayed value.
+function rankForExercise(exId) {
+  const ex = EXERCISES.find(e => e.id === exId);
+  if (!ex) return null;
+  const found = bestSetsByVariant(exId);
+  if (!found) return null;
+
+  const { byVariant, lastDate, lastVariant } = found;
+  const daysSince = daysBetween(lastDate, todayISO());
+  const base = { id: exId, name: ex.name, group: ex.group, weight: ex.weight,
+                 lastDate, daysSince, variant: lastVariant };
+
+  // Rank the variant actually being trained now, not the flattering one.
+  const best = byVariant[lastVariant];
+  if (!best) return { ...base, ranked: false, reason: "no loaded sets" };
+
+  const std = stdForExercise(ex, lastVariant);
+  if (!std) return { ...base, ranked: false, reason: "no standards for this variant",
+                     value: best.value, reps: best.reps };
+
+  const pct  = percentileFor(best.value, std, currentBodyweight());
+  const peak = tierFromPct(pct);
+  if (!peak) return { ...base, ranked: false, reason: "unrankable" };
+
+  const { rung, lost } = applyDecay(peak.rung, daysSince);
+
+  // Other variants stay visible, so a stronger-but-stale variant does not
+  // silently vanish when the training style changes.
+  const others = Object.values(byVariant)
+    .filter(b => b.variant !== lastVariant)
+    .map(b => {
+      const s = stdForExercise(ex, b.variant);
+      const p = s ? percentileFor(b.value, s, currentBodyweight()) : null;
+      return { variant: b.variant, value: b.value, date: b.date,
+               ...(p != null ? tierFromPct(p) : {}), pct: p };
+    });
+
+  return { ...base, ranked: true, pct, peak, lost, others,
+           value: best.value, reps: best.reps, bestDate: best.date,
+           confidence: e1rmConfidence(best.reps), unit: std.kind,
+           ...rungToTier(rung) };
+}
+
+// Upkeep decay. Deliberately a house rule, not physiology — see DECAY.
+function applyDecay(rung, daysSince) {
+  if (rung == null || daysSince == null || daysSince <= DECAY.graceDays) {
+    return { rung, lost: 0 };
+  }
+  const divisions = Math.floor((daysSince - DECAY.graceDays) / DECAY.daysPerDivision);
+  const lost = Math.min(divisions / 3, DECAY.maxTiersLost);
+  return { rung: Math.max(0, rung - lost), lost };
+}
+
+function allRanks() {
+  return EXERCISES.map(ex => rankForExercise(ex.id)).filter(Boolean);
+}
+
+// Group score: weighted mean of rungs (compound 1.0 / machine 0.75 /
+// isolation 0.5), so Arms can't ride to Gold on curls alone.
+function groupRank(group) {
+  const rs = allRanks().filter(r => r.group === group && r.ranked);
+  if (!rs.length) return null;
+  const wsum = rs.reduce((s, r) => s + r.weight, 0);
+  const rung = rs.reduce((s, r) => s + r.rung * r.weight, 0) / wsum;
+  const days = Math.min(...rs.map(r => r.daysSince ?? 9999));
+  return { group, ...rungToTier(rung), count: rs.length, daysSince: days,
+           isolationOnly: rs.every(r => r.weight <= 0.5),
+           thin: rs.length === 1,
+           decayed: rs.some(r => r.lost > 0) };
+}
+
+// Headline: the big five only. Empty slots are what make "Bronze" honest for
+// someone who has never benched or squatted.
+function overallRank() {
+  const rs = allRanks().filter(r => BIG_FIVE.includes(r.id) && r.ranked);
+  const missing = BIG_FIVE.filter(id => !rs.some(r => r.id === id));
+  if (!rs.length) return { rung: 0, ...rungToTier(0), count: 0, missing };
+  // Untrained big-five lifts count as rung 0 rather than being skipped —
+  // otherwise a single strong lift would read as a high overall rank.
+  const rung = rs.reduce((s, r) => s + r.rung, 0) / BIG_FIVE.length;
+  return { ...rungToTier(rung), count: rs.length, missing };
+}
+
 // ── PROGRESS ──────────────────────────────────────────────────────────────
 
 // Returns the number of calendar days between two ISO date strings (a → b)
@@ -956,88 +1416,202 @@ function calcStreak() {
   return streak;
 }
 
+function tierClass(tier) { return "tier-" + String(tier || "").toLowerCase(); }
+
+// 1st/2nd/3rd/4th — 11-13 are the exception that catches naive implementations.
+function ordinal(n) {
+  const v = Math.round(n), rem100 = v % 100;
+  if (rem100 >= 11 && rem100 <= 13) return v + "th";
+  return v + (["th", "st", "nd", "rd"][v % 10] || "th");
+}
+
+function rankLabel(r) {
+  return r && r.tier ? `${r.tier} ${r.division}` : "Unranked";
+}
+
+// e1RM over time for one exercise, restricted to a single variant so the line
+// doesn't jump when the movement changes (seated vs standing lateral raise).
+function e1rmSeries(exId, variant) {
+  const ex = EXERCISES.find(e => e.id === exId);
+  if (!ex) return [];
+  return workouts
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map(w => {
+      const logged = w.exercises.find(e =>
+        e.id === exId && (!variant || !e.variant || e.variant === variant));
+      if (!logged) return null;
+      const vals = logged.sets.map(s => setValue(ex, s)).filter(v => v != null);
+      return vals.length ? { date: w.date, value: Math.max(...vals) } : null;
+    })
+    .filter(Boolean);
+}
+
+function sparkline(series) {
+  if (series.length < 2) return "";
+  const W = 120, H = 28, P = 2;
+  const vals = series.map(s => s.value);
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const span = max - min || 1;
+  const pts = series.map((s, i) => {
+    const x = P + (i / (series.length - 1)) * (W - 2 * P);
+    const y = H - P - ((s.value - min) / span) * (H - 2 * P);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" role="img"
+      aria-label="Estimated 1RM trend across ${series.length} sessions">
+      <polyline points="${pts.join(" ")}" fill="none" stroke="var(--color-primary)"
+        stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+      <circle cx="${pts[pts.length - 1].split(",")[0]}" cy="${pts[pts.length - 1].split(",")[1]}"
+        r="2" fill="var(--color-primary)"/>
+    </svg>`;
+}
+
 function renderProgress() {
   const grid       = document.getElementById("progress-grid");
   const streakArea = document.getElementById("streak-area");
+  const rankArea   = document.getElementById("rank-area");
   grid.innerHTML   = "";
   renderWeightTrendSection();
 
   const streak = calcStreak();
   streakArea.innerHTML = streak > 0
     ? `<div class="streak-badge">🔥 ${streak}-session streak</div>`
-    : `<div class="streak-badge" style="background:var(--color-surface-offset);color:var(--color-text-muted)">No active streak — keep going!</div>`;
+    : `<div class="streak-badge streak-none">No active streak — keep going!</div>`;
 
   if (!workouts.length) {
+    if (rankArea) rankArea.innerHTML = "";
     grid.innerHTML = `
       <div class="empty-state" style="grid-column:1/-1">
         <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
           <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
         </svg>
         <h3>No workout data yet</h3>
-        <p>Complete a few workouts to track your personal bests here.</p>
+        <p>Complete a few workouts to see your ranks and personal bests here.</p>
       </div>`;
     return;
   }
 
+  if (rankArea) rankArea.innerHTML = renderRanks();
+
+  // ── Per-exercise cards ─────────────────────────────────────────────────
+  const ranks = allRanks();
   EXERCISES.forEach(ex => {
-    const sessionBests = workouts
-      .slice()
-      .reverse()
-      .map(w => {
-        const e = w.exercises.find(x => x.id === ex.id);
-        if (!e) return null;
-        const doneSets = e.sets.filter(s => s.reps != null);
-        if (!doneSets.length) return null;
-        const top = doneSets.reduce((best, s) => {
-          if (ex.weighted) return (s.weight ?? 0) >= (best.weight ?? 0) ? s : best;
-          return (s.reps ?? 0) >= (best.reps ?? 0) ? s : best;
-        }, doneSets[0]);
-        return { date: w.date, ...top };
-      })
-      .filter(Boolean);
+    const r = ranks.find(x => x.id === ex.id);
+    if (!r) return;   // never logged
 
-    if (!sessionBests.length) return;
+    const series = e1rmSeries(ex.id, r.variant);
+    const unit   = r.unit === "reps" ? " reps" : "lb";
+    const prev   = series.length > 1 ? series[series.length - 2].value : null;
+    const last   = series.length ? series[series.length - 1].value : null;
+    const delta  = prev != null && last != null ? last - prev : null;
 
-    const allTimeBest = sessionBests.reduce((best, s) => {
-      if (ex.weighted) return (s.weight ?? 0) >= (best.weight ?? 0) ? s : best;
-      return (s.reps ?? 0) >= (best.reps ?? 0) ? s : best;
-    }, sessionBests[0]);
+    // Both directions shown. The old card only ever rendered gains, which hid
+    // every regression behind silence.
+    const deltaHtml = delta == null || Math.abs(delta) < 0.05 ? ""
+      : `<span class="pb-delta ${delta > 0 ? "delta-up" : "delta-down"}">${
+          delta > 0 ? "+" : ""}${delta.toFixed(1)}${unit}</span>`;
 
-    const lastSession = sessionBests[sessionBests.length - 1];
-    const prevSession = sessionBests.length > 1 ? sessionBests[sessionBests.length - 2] : null;
-    const bestReps    = sessionBests.reduce((max, s) => Math.max(max, s.reps ?? 0), 0);
-
-    let deltaHtml = "";
-    if (prevSession && ex.weighted && lastSession.weight != null && prevSession.weight != null) {
-      const d = lastSession.weight - prevSession.weight;
-      if (d > 0) deltaHtml = `<span class="pb-delta">+${d}lb</span>`;
-    }
+    const staleHtml = r.daysSince != null && r.daysSince > DECAY.graceDays
+      ? `<span class="stale-flag">${r.daysSince}d untrained${r.lost > 0 ? " · rank slipping" : ""}</span>`
+      : "";
 
     const card = document.createElement("div");
     card.className = "card progress-card";
     card.innerHTML = `
-      <div class="ex-name">${ex.name} <span class="exercise-tag">${ex.tag}</span></div>
-      ${ex.weighted ? `
-        <div class="pb-row">
-          <span class="pb-label">Best weight</span>
-          <div style="display:flex;align-items:baseline">
-            <span class="pb-value">${allTimeBest.weight ?? "–"}lb</span>${deltaHtml}
-          </div>
-        </div>` : ""}
-      <div class="pb-row">
-        <span class="pb-label">Best reps</span>
-        <span class="pb-value">${bestReps || "–"}</span>
+      <div class="pc-head">
+        <div>
+          <div class="ex-name">${esc(ex.name)}${ex.legacy ? ` <span class="legacy-tag">retired</span>` : ""}</div>
+          <div class="pc-sub">${esc(ex.group)}${r.variant ? ` · ${esc(r.variant)}` : ""}</div>
+        </div>
+        ${r.ranked
+          ? `<span class="rank-pill ${tierClass(r.tier)}">${rankLabel(r)}</span>`
+          : `<span class="rank-pill rank-unranked" title="${esc(r.reason || "")}">Unranked</span>`}
       </div>
+      ${series.length > 1 ? `<div class="pc-spark">${sparkline(series)}</div>` : ""}
       <div class="pb-row">
-        <span class="pb-label">Sessions logged</span>
-        <span class="pb-value">${sessionBests.length}</span>
+        <span class="pb-label">Best ${r.unit === "reps" ? "reps" : "est. 1RM"}</span>
+        <div style="display:flex;align-items:baseline">
+          <span class="pb-value">${r.value != null ? r.value.toFixed(r.unit === "reps" ? 0 : 1) + unit : "–"}</span>${deltaHtml}
+        </div>
+      </div>
+      ${r.ranked ? `
+      <div class="pb-row">
+        <span class="pb-label">Percentile</span>
+        <span class="pb-value">${ordinal(r.pct)}
+          ${r.confidence !== "high" ? `<span class="conf-flag conf-${r.confidence}" title="Estimated from a ${r.reps}-rep set — 1RM formulas spread badly above ~12 reps (Epley and Brzycki differ by ~27% at 20 reps)">est. from ${r.reps} reps</span>` : ""}
+        </span>
+      </div>` : ""}
+      <div class="pb-row">
+        <span class="pb-label">Sessions</span>
+        <span class="pb-value">${series.length}</span>
       </div>
       <div class="pb-row">
         <span class="pb-label">Last worked</span>
-        <span class="pb-value" style="font-family:var(--font-body);font-size:var(--text-xs)">${formatDate(lastSession.date)}</span>
-      </div>`;
+        <span class="pb-value pb-date">${formatDate(r.lastDate)} ${staleHtml}</span>
+      </div>
+      ${(r.others || []).filter(o => o.tier).map(o => `
+      <div class="pb-row pb-other">
+        <span class="pb-label">${esc(o.variant)}</span>
+        <span class="pb-value"><span class="rank-pill rank-pill-sm ${tierClass(o.tier)}">${o.tier} ${o.division}</span></span>
+      </div>`).join("")}`;
     grid.appendChild(card);
   });
+}
+
+// Overall + per-group tiles. The headline uses only the big five, which is what
+// makes "Bronze" honest for someone who has never benched, squatted or pulled
+// down — the isolation lifts get their own tiles and can't inflate it.
+function renderRanks() {
+  const o = overallRank();
+  const missingNames = o.missing.map(id => {
+    const ex = EXERCISES.find(e => e.id === id);
+    return ex ? ex.name : id;
+  });
+
+  const tiles = GROUPS.map(g => {
+    const gr = groupRank(g);
+    if (!gr) return `
+      <div class="rank-tile rank-tile-empty">
+        <span class="rt-group">${esc(g)}</span>
+        <span class="rt-tier">—</span>
+        <span class="rt-note">not logged</span>
+      </div>`;
+    const stale = gr.daysSince > DECAY.graceDays;
+    return `
+      <div class="rank-tile ${tierClass(gr.tier)}">
+        <span class="rt-group">${esc(g)}</span>
+        <span class="rt-tier">${gr.tier} ${gr.division}</span>
+        <span class="rt-note">
+          ${gr.thin ? "1 lift" : `${gr.count} lifts`}${gr.isolationOnly ? " · isolation only" : ""}
+          ${stale ? `<span class="rt-stale">· ${gr.daysSince}d</span>` : ""}
+        </span>
+      </div>`;
+  }).join("");
+
+  return `
+    <div class="rank-block">
+      <div class="rank-overall ${tierClass(o.tier)}">
+        <div class="ro-left">
+          <span class="ro-label">Overall</span>
+          <span class="ro-tier">${o.tier} ${o.division}</span>
+        </div>
+        <div class="ro-right">
+          <span class="ro-basis">from the big five</span>
+          ${o.missing.length
+            ? `<span class="ro-missing">no data yet: ${esc(missingNames.join(", "))}</span>`
+            : `<span class="ro-basis">all five logged</span>`}
+        </div>
+      </div>
+      <div class="rank-tiles">${tiles}</div>
+      <p class="rank-note">
+        Percentiles are against <strong>people who log lifts on Strength Level</strong> —
+        a committed population, well above average. Thresholds scale with bodyweight,
+        so this measures strength <em>per pound</em>. Untrained groups slip after
+        ${DECAY.graceDays} days as an upkeep rule, not a claim that you got weaker —
+        training one restores it immediately.
+      </p>
+    </div>`;
 }
 
 // ── FOOD ──────────────────────────────────────────────────────────────────
@@ -1076,6 +1650,9 @@ function foodItemsFor(date) {
   return nutrition.filter(n => n.date === date);
 }
 
+// Sums treat null as "contributes nothing", which is right — a nutrient nobody
+// recorded can't be added. nutrientCoverage() reports how much of the day the
+// sum actually saw, so a low total is never mistaken for a low intake.
 function foodTotals(items) {
   const t = {};
   FOOD_MACROS.forEach(k => {
@@ -1167,7 +1744,7 @@ function addFood(f) {
     source: f.verified ? "label" : "estimate",
     conf:   f.verified ? "high"  : "med",
   };
-  FOOD_MACROS.forEach(k => { item[k] = Number(f[k]) || 0; });
+  FOOD_MACROS.forEach(k => { item[k] = nutVal(f[k], k); });
   nutrition.push(item);
   markFoodDirty(currentFoodDate);
 
@@ -1196,7 +1773,10 @@ function addCustomFood() {
     conf: document.getElementById("cf-conf")?.value || "med",
   };
   FOOD_MACROS.forEach(k => {
-    item[k] = numOrNull(document.getElementById(`cf-${k}`)?.value) ?? 0;
+    const field = document.getElementById(`cf-${k}`);
+    // No input for this nutrient means unknown, not zero — the custom-item form
+    // only carries the seven core macros.
+    item[k] = field ? (numOrNull(field.value) ?? (CORE_MACROS.includes(k) ? 0 : null)) : null;
   });
   nutrition.push(item);
   markFoodDirty(currentFoodDate);
@@ -1217,8 +1797,21 @@ function foodBase(it) {
   if (f) return f;
   const q = Number(it.qty) || 1;
   const b = {};
-  FOOD_MACROS.forEach(k => { b[k] = (Number(it[k]) || 0) / q; });
+  FOOD_MACROS.forEach(k => {
+    b[k] = it[k] === null || it[k] === undefined ? null : (Number(it[k]) || 0) / q;
+  });
   return b;
+}
+
+// Coerce a raw database/base value for storage: numbers scale, blanks stay
+// blank. This one helper is what keeps "unknown" distinguishable from "zero"
+// all the way from the Foods tab through to the coverage percentage.
+function nutVal(v, key, factor = 1) {
+  if (v === null || v === undefined || v === "") {
+    return CORE_MACROS.includes(key) ? 0 : null;
+  }
+  const n = Number(v);
+  return Number.isFinite(n) ? n * factor : null;
 }
 
 function stepFoodQty(id, delta) {
@@ -1229,7 +1822,8 @@ function stepFoodQty(id, delta) {
 
   const base = foodBase(it);
   FOOD_MACROS.forEach(k => {
-    it[k] = Math.round((Number(base[k]) || 0) * next * 10) / 10;
+    const scaled = nutVal(base[k], k, next);
+    it[k] = scaled === null ? null : Math.round(scaled * 10) / 10;
   });
   it.qty = next;
   markFoodDirty(it.date);
@@ -1260,12 +1854,12 @@ async function saveFoodDay() {
     _type:   "food",
     date:    currentFoodDate,
     savedAt: new Date().toISOString(),
-    items:   items.map(it => ({
-      meal: it.meal, key: it.key, name: it.name, qty: it.qty,
-      cal: it.cal, p: it.p, c: it.c, fib: it.fib,
-      fat: it.fat, sat: it.sat, na: it.na,
-      source: it.source, conf: it.conf,
-    })),
+    items:   items.map(it => {
+      const row = { meal: it.meal, key: it.key, name: it.name, qty: it.qty,
+                    source: it.source, conf: it.conf };
+      FOOD_MACROS.forEach(k => { row[k] = it[k] === undefined ? null : it[k]; });
+      return row;
+    }),
   };
 
   if (!sheetsUrl) {
@@ -1295,6 +1889,81 @@ async function syncFoodToSheets(entry) {
   renderFoodTab();
 }
 
+// ── FOOD: coverage + pace ─────────────────────────────────────────────────
+
+// The share of a day's CALORIES that came from items actually carrying a value
+// for `key`. This is what makes half-filled columns safe: magnesium reads as
+// "210mg from 53% of the day", never as a deficiency invented from blank cells.
+// Weighted by calories rather than item count so a 600-cal untracked lunch
+// counts for more than an untracked Coke Zero.
+function nutrientCoverage(items, key) {
+  const totalCal = items.reduce((s, it) => s + (Number(it.cal) || 0), 0);
+  if (!totalCal) return items.length ? 0 : 1;
+  const covered = items.reduce((s, it) =>
+    s + (it[key] === null || it[key] === undefined ? 0 : (Number(it.cal) || 0)), 0);
+  return covered / totalCal;
+}
+
+// How far through the eating day we are, 7am to 9pm. Used only for TODAY —
+// a past date is judged on its final total, not on the clock.
+function dayProgress() {
+  const h = new Date().getHours() + new Date().getMinutes() / 60;
+  return Math.max(0, Math.min(1, (h - 7) / 14));
+}
+
+// Colour state for a "hit this number" nutrient. Deliberately neutral early:
+// 30g of protein at 9am is not an error, and painting it red every morning
+// teaches you to ignore the colour.
+function paceState(actual, target, isToday) {
+  if (!target) return "";
+  const ratio = actual / target;
+  if (!isToday) return ratio >= 0.95 ? "ok" : ratio >= 0.8 ? "near" : "under";
+  const expected = dayProgress();
+  if (expected < 0.35) return "";                 // too early to judge
+  if (ratio >= expected * 0.9)  return "ok";
+  if (ratio >= expected * 0.65) return "near";
+  return "under";
+}
+
+// ── FOOD: copy a previous day ─────────────────────────────────────────────
+
+// Same meals nearly every day is the stated eating pattern, so cloning is the
+// single biggest reduction in daily friction — roughly ten taps down to two.
+function recentLoggedDates(limit = 7) {
+  const seen = [];
+  nutrition.forEach(n => {
+    if (n.date !== currentFoodDate && !seen.includes(n.date)) seen.push(n.date);
+  });
+  return seen.sort((a, b) => b.localeCompare(a)).slice(0, limit);
+}
+
+function openCopyDay() {
+  const dates = recentLoggedDates();
+  if (!dates.length) { showToast("No earlier days to copy"); return; }
+  const list = dates.map(d => {
+    const t = foodTotals(foodItemsFor(d));
+    return `<button class="copy-day-option" onclick="copyDay('${d}')">
+        <span>${formatDate(d)}</span>
+        <span class="cd-meta">${foodItemsFor(d).length} items · ${fmtNum(t.cal)} cal</span>
+      </button>`;
+  }).join("");
+  showConfirmHtml("Copy a day", `<div class="copy-day-list">${list}</div>`);
+}
+
+function copyDay(fromDate) {
+  const items = foodItemsFor(fromDate);
+  if (!items.length) { showToast("That day has nothing to copy"); return; }
+  items.forEach(it => {
+    const copy = { ...it, id: newFoodId(), date: currentFoodDate };
+    nutrition.push(copy);
+  });
+  markFoodDirty(currentFoodDate);
+  persist();
+  closeModal();
+  renderFoodTab();
+  showToast(`Copied ${items.length} item(s) from ${formatDate(fromDate)}`);
+}
+
 // ── FOOD: render ──────────────────────────────────────────────────────────
 
 function renderFoodTab() {
@@ -1307,46 +1976,172 @@ function renderFoodTotals() {
   const el = document.getElementById("food-totals");
   if (!el) return;
 
-  const t   = foodTotals(foodItemsFor(currentFoodDate));
-  const rem = FOOD_TARGETS.cal - t.cal;
-  const pct = Math.min(100, (t.cal / FOOD_TARGETS.cal) * 100);
+  const items   = foodItemsFor(currentFoodDate);
+  const t       = foodTotals(items);
+  const isToday = currentFoodDate === todayISO();
+
+  const rem      = FOOD_TARGETS.cal - t.cal;
+  const pct      = Math.min(100, (t.cal / FOOD_TARGETS.cal) * 100);
   const floorPct = (FOOD_TARGETS.calFloor / FOOD_TARGETS.cal) * 100;
+  const calState = paceState(t.cal, FOOD_TARGETS.cal, isToday);
 
   const proteinState = t.p >= FOOD_TARGETS.proteinMin ? "ok"
-                     : t.p >= 130                     ? "near" : "under";
-  const remLabel = rem > 0
-    ? `${fmtNum(rem)} to go`
-    : `${fmtNum(-rem)} over`;
-  const unsaved = foodDirty.includes(currentFoodDate)
+                     : paceState(t.p, FOOD_TARGETS.proteinMin, isToday);
+  const proteinLeft  = Math.max(0, FOOD_TARGETS.proteinMin - t.p);
+
+  const remLabel = rem > 0 ? `${fmtNum(rem)} to go` : `${fmtNum(-rem)} over`;
+  const unsaved  = foodDirty.includes(currentFoodDate)
     ? `<span class="food-unsaved">Unsaved — press Save Day</span>` : "";
+
+  // Sodium gets a real bar against the plan's ~2,750 rather than a single
+  // warning threshold: it is the one macro that has been consistently out of
+  // band, so it deserves the same treatment calories get.
+  const naTarget = NUTRIENTS.find(n => n.key === "na").target;
+  const naPct    = Math.min(100, (t.na / naTarget) * 100);
+  const naState  = t.na > naTarget ? "over" : t.na > naTarget * 0.85 ? "near" : "ok";
 
   el.innerHTML = `
     <div class="food-totals">
       <div class="food-total-main">
         <div class="food-total-block">
-          <span class="ft-num">${fmtNum(t.cal)}</span>
+          <span class="ft-num ft-${calState}">${fmtNum(t.cal)}</span>
           <span class="ft-unit">cal</span>
           <span class="ft-sub">${remLabel} · target ${fmtNum(FOOD_TARGETS.cal)}</span>
         </div>
         <div class="food-total-block">
           <span class="ft-num ft-${proteinState}">${fmtNum(t.p)}</span>
           <span class="ft-unit">g protein</span>
-          <span class="ft-sub">band ${FOOD_TARGETS.proteinMin}–${FOOD_TARGETS.proteinMax}</span>
+          <span class="ft-sub">${proteinLeft > 0 ? `${fmtNum(proteinLeft)}g to go · ` : "in band · "}${FOOD_TARGETS.proteinMin}–${FOOD_TARGETS.proteinMax}</span>
         </div>
       </div>
+
       <div class="food-bar" role="img" aria-label="${fmtNum(t.cal)} of ${fmtNum(FOOD_TARGETS.cal)} calories">
         <div class="food-bar-fill" style="width:${pct}%"></div>
         <div class="food-bar-floor" style="left:${floorPct}%" title="2,500 floor"></div>
       </div>
+
+      <div class="food-na-row">
+        <span class="na-label">Sodium</span>
+        <div class="food-bar food-bar-sm">
+          <div class="food-bar-fill na-${naState}" style="width:${naPct}%"></div>
+        </div>
+        <span class="na-val na-${naState}">${fmtNum(t.na)}<span class="na-target"> / ${fmtNum(naTarget)}mg</span></span>
+      </div>
+
       ${unsaved}
+
       <div class="food-macro-row">
         <span><b>${fmtNum(t.c)}</b> carb</span>
         <span><b>${fmtNum(t.fib)}</b> fib</span>
         <span><b>${fmtNum(t.fat)}</b> fat</span>
         <span><b>${fmtNum(t.sat)}</b> sat</span>
-        <span class="${t.na > 3500 ? "fm-warn" : ""}"><b>${fmtNum(t.na)}</b> mg Na</span>
       </div>
+
+      ${renderMicroSummary(items, t, isToday)}
     </div>`;
+}
+
+// Track everything, display by exception. Only nutrients that are actually off
+// target surface; the rest stay folded away so the tab stays readable.
+function renderMicroSummary(items, t, isToday) {
+  const micros = NUTRIENTS.filter(n => !n.core && n.dv > 0);
+  if (!micros.length) return "";
+
+  // Same clock rule as calories and protein. Judging a micronutrient against
+  // the full day's DV at breakfast marks everything deficient every morning,
+  // which trains you to ignore the warning entirely.
+  const progress = isToday ? dayProgress() : 1;
+  const tooEarly = isToday && progress < 0.35;
+
+  const rows = micros.map(n => {
+    const cov = nutrientCoverage(items, n.key);
+    const val = Number(t[n.key]) || 0;
+    const pct = (val / n.dv) * 100;
+    // Compare against how much of the DV should be in by now, not the whole DV.
+    const low  = n.goal === "hit" && val < n.dv * progress * 0.7;
+    const over = n.goal === "cap" && pct > 100;
+    // Under half the day's calories covered means the number is missing data,
+    // not evidence of a shortfall — never flag on that.
+    return { n, cov, val, pct, flagged: !tooEarly && (low || over) && cov > 0.5 };
+  });
+
+  const flagged = rows.filter(r => r.flagged);
+  const untracked = rows.filter(r => r.cov < 0.5).length;
+
+  // "All on target" must never be shown when the reason nothing flagged is that
+  // nothing is tracked. Silence from missing data is not a clean bill of health.
+  const head = tooEarly
+    ? `<span class="micro-early">Tracking ${micros.length} micronutrients — too early in the day to judge</span>`
+    : flagged.length
+    ? `<span class="micro-warn">⚠ ${flagged.length} off target</span> ${flagged.map(r => esc(r.n.label)).join(" · ")}`
+    : untracked >= micros.length / 2
+    ? `<span class="micro-early">Not enough data to judge — ${untracked} of ${micros.length} micronutrients barely covered</span>`
+    : `<span class="micro-ok">${micros.length - untracked} micronutrients on target</span>`;
+
+  const detail = rows.map(r => `
+    <div class="micro-row${r.flagged ? " micro-row-flag" : ""}">
+      <span class="micro-name">${esc(r.n.label)}
+        <span class="micro-src micro-src-${esc(r.n.src)}">${esc(r.n.src)}</span></span>
+      <span class="micro-val">${fmtNum(r.val)}${esc(r.n.unit)}
+        <span class="micro-pct">${Math.round(r.pct)}% DV</span></span>
+      <span class="micro-cov${r.cov < 0.5 ? " micro-cov-low" : ""}">${Math.round(r.cov * 100)}% covered</span>
+    </div>`).join("");
+
+  return `
+    <details class="micro-block">
+      <summary class="micro-summary">${head}
+        ${untracked && flagged.length ? `<span class="micro-untracked">${untracked} barely tracked</span>` : ""}
+      </summary>
+      <div class="micro-list">${detail}</div>
+      <p class="micro-note">“Covered” is the share of today’s calories from foods
+        that actually carry a value for that nutrient. A blank cell is not a zero —
+        low coverage means missing data, not a deficiency.</p>
+    </details>`;
+}
+
+function renderFoodResults() {
+  const el = document.getElementById("food-results");
+  if (!el) return;
+
+  if (!foods.length) {
+    el.innerHTML = sheetsUrl
+      ? `<div class="food-empty">No food database found. Add a <strong>Foods</strong>
+         tab to your sheet (see <code>appsscript.js</code>), then reload.</div>`
+      : `<div class="food-empty"><strong>This browser isn't connected to your sheet.</strong><br>
+         Paste your deployment URL in <strong>Settings</strong>, then reload. Sync settings are
+         stored per browser, so each device needs it entered once.</div>`;
+    return;
+  }
+
+  const q = foodQuery.trim();
+
+  // Nothing typed: a single compact row of recents rather than eight full-width
+  // rows permanently occupying the screen above the day's log.
+  if (!q) {
+    const recents = recentFoods().slice(0, 8);
+    lastFoodResults = recents;
+    el.innerHTML = `
+      <div class="food-chips">
+        ${recents.map((f, i) => `
+          <button class="food-chip" onclick="addFoodResult(${i})" title="${esc(f.name)}">
+            ${esc(f.name)}<span class="chip-cal">${fmtNum(f.cal)}</span>
+          </button>`).join("")}
+      </div>`;
+    return;
+  }
+
+  const results = foodSearchResults();
+  if (!results.length) {
+    el.innerHTML = `<div class="food-empty">No match. Use <strong>Custom item</strong> below
+      for anything not in the database.</div>`;
+    return;
+  }
+
+  el.innerHTML = results.map((f, i) => `
+    <button class="food-result" onclick="addFoodResult(${i})">
+      <span class="fr-name">${esc(f.name)}${f.brand ? ` <span class="fr-brand">${esc(f.brand)}</span>` : ""}</span>
+      <span class="fr-meta">${fmtNum(f.cal)} cal · ${fmtNum(f.p)}g P<span class="fr-serving">${esc(f.serving)}</span></span>
+    </button>`).join("");
 }
 
 function renderFoodItems() {
@@ -1355,7 +2150,9 @@ function renderFoodItems() {
 
   const items = foodItemsFor(currentFoodDate);
   if (!items.length) {
-    el.innerHTML = `<div class="food-empty">Nothing logged for this day yet.</div>`;
+    el.innerHTML = `<div class="food-empty">Nothing logged for this day yet.
+      <button class="btn btn-ghost btn-sm" onclick="openCopyDay()">Copy a previous day</button>
+    </div>`;
     return;
   }
 
@@ -1368,11 +2165,13 @@ function renderFoodItems() {
   const other = items.filter(i => !MEALS.includes(i.meal));
   if (other.length) groups.push({ meal: "Other", rows: other });
 
-  el.innerHTML = groups.map(g => `
+  el.innerHTML = groups.map(g => {
+    const gt = foodTotals(g.rows);
+    return `
     <div class="food-group">
       <div class="food-group-head">
         <span>${esc(g.meal)}</span>
-        <span class="food-group-cal">${fmtNum(foodTotals(g.rows).cal)} cal</span>
+        <span class="food-group-cal">${fmtNum(gt.p)}g P · ${fmtNum(gt.cal)} cal</span>
       </div>
       ${g.rows.map(it => `
         <div class="food-item">
@@ -1388,7 +2187,8 @@ function renderFoodItems() {
           <button class="btn btn-ghost btn-sm btn-danger" onclick="removeFoodItem('${it.id}')"
                   aria-label="Remove ${esc(it.name)}">×</button>
         </div>`).join("")}
-    </div>`).join("");
+    </div>`;
+  }).join("");
 }
 
 // ── SETTINGS ──────────────────────────────────────────────────────────────
@@ -1398,6 +2198,8 @@ function renderSettings() {
   if (input) input.value = sheetsUrl;
   const secret = document.getElementById("sheets-secret");
   if (secret) secret.value = sheetsSecret;
+  const goal = document.getElementById("weight-goal");
+  if (goal) goal.value = weightGoal;
   updateQueueStatus();
 }
 
@@ -1568,7 +2370,18 @@ function showToast(msg) {
 
 let confirmCallback = null;
 
+// Markup-bearing modal (the copy-day list). Callers own the escaping — the
+// only current caller builds its rows from dates and numbers, not user text.
+function showConfirmHtml(title, html) {
+  document.getElementById("modal-title").textContent = title;
+  document.getElementById("modal-body-text").innerHTML = html;
+  document.getElementById("modal-confirm-btn").style.display = "none";
+  confirmCallback = null;
+  document.getElementById("confirm-modal").classList.add("open");
+}
+
 function showConfirm(title, body, onConfirm, confirmLabel = "Confirm") {
+  document.getElementById("modal-confirm-btn").style.display = "";
   document.getElementById("modal-title").textContent      = title;
   document.getElementById("modal-body-text").textContent  = body;
   document.getElementById("modal-confirm-btn").textContent = confirmLabel;

@@ -359,8 +359,13 @@ a,button,[role="button"],input,select{
 
 /* weight change stat */
 .weight-stat-delta{font-weight:600}
-.weight-stat-delta.stat-down{color:var(--color-success)}
-.weight-stat-delta.stat-up{color:var(--color-warning)}
+/* Judged against the goal, not against a built-in assumption that down is good.
+   stat-good = the direction and pace you asked for; stat-watch = worth a look. */
+.weight-stat-delta.stat-good{color:var(--color-success)}
+.weight-stat-delta.stat-watch{color:var(--color-orange)}
+.weight-rate{font-family:var(--font-mono);font-size:var(--text-xs);
+  color:var(--color-text-muted);margin-left:var(--space-2)}
+.weight-note{font-size:var(--text-xs);color:var(--color-text-faint);margin-left:var(--space-2)}
 #weight-change-stat{font-size:var(--text-sm);color:var(--color-text-muted)}
 
 /* chart wrapper */
@@ -376,8 +381,6 @@ a,button,[role="button"],input,select{
 }
 
 /* progress card delta colours */
-.pb-value.stat-down{color:var(--color-success)}
-.pb-value.stat-up{color:var(--color-warning)}
 
 /* ── WEIGHT LOG LIST (Weight tab) ─────────────────────────── */
 .weight-log-list{margin-top:var(--space-5);display:flex;flex-direction:column;gap:0}
@@ -543,3 +546,178 @@ a,button,[role="button"],input,select{
   .qty-btn{width:40px;height:40px}
   .food-result{padding:var(--space-3)}
 }
+/* ── RANK TIERS ────────────────────────────────────────────────── */
+:root,[data-theme="light"]{
+  --tier-bronze:#9c6239;--tier-silver:#78848c;--tier-gold:#b58a1e;
+  --tier-platinum:#2f8d80;--tier-diamond:#3a7fc4;--tier-champion:#8f4cb8;
+}
+[data-theme="dark"]{
+  --tier-bronze:#c98a55;--tier-silver:#9aa6ae;--tier-gold:#d9ad3c;
+  --tier-platinum:#4fbfae;--tier-diamond:#5fa4e8;--tier-champion:#b473d8;
+}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){
+  --tier-bronze:#c98a55;--tier-silver:#9aa6ae;--tier-gold:#d9ad3c;
+  --tier-platinum:#4fbfae;--tier-diamond:#5fa4e8;--tier-champion:#b473d8;
+}}
+.tier-bronze{--tier:var(--tier-bronze)}
+.tier-silver{--tier:var(--tier-silver)}
+.tier-gold{--tier:var(--tier-gold)}
+.tier-platinum{--tier:var(--tier-platinum)}
+.tier-diamond{--tier:var(--tier-diamond)}
+.tier-champion{--tier:var(--tier-champion)}
+
+.rank-block{margin-bottom:var(--space-6)}
+.rank-overall{
+  display:flex;align-items:center;justify-content:space-between;gap:var(--space-4);
+  flex-wrap:wrap;padding:var(--space-5);border-radius:var(--radius-lg);
+  background:color-mix(in oklch,var(--tier,var(--color-primary)) 10%,var(--color-surface));
+  border:1px solid color-mix(in oklch,var(--tier,var(--color-primary)) 35%,transparent);
+  margin-bottom:var(--space-4);
+}
+.ro-left{display:flex;flex-direction:column;gap:2px}
+.ro-label{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:.06em;
+  color:var(--color-text-muted)}
+.ro-tier{font-size:var(--text-xl);font-weight:700;line-height:1.05;
+  color:var(--tier,var(--color-primary));letter-spacing:-.02em}
+.ro-right{display:flex;flex-direction:column;align-items:flex-end;gap:2px;text-align:right}
+.ro-basis{font-size:var(--text-xs);color:var(--color-text-muted)}
+.ro-missing{font-size:var(--text-xs);color:var(--color-text-faint);max-width:30ch}
+
+.rank-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:var(--space-3)}
+.rank-tile{
+  display:flex;flex-direction:column;gap:2px;padding:var(--space-3) var(--space-4);
+  border-radius:var(--radius-md);background:var(--color-surface);
+  border:1px solid var(--color-border);
+  border-left:3px solid var(--tier,var(--color-divider));
+}
+.rank-tile-empty{opacity:.55}
+.rt-group{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:.06em;
+  color:var(--color-text-muted)}
+.rt-tier{font-size:var(--text-base);font-weight:700;color:var(--tier,var(--color-text-faint))}
+.rt-note{font-size:var(--text-xs);color:var(--color-text-faint)}
+.rt-stale{color:var(--color-orange)}
+.rank-note{font-size:var(--text-xs);color:var(--color-text-faint);
+  margin-top:var(--space-3);line-height:1.5;max-width:70ch}
+
+.rank-pill{
+  font-size:var(--text-xs);font-weight:700;white-space:nowrap;
+  padding:var(--space-1) var(--space-3);border-radius:var(--radius-full);
+  color:var(--tier,var(--color-text-muted));
+  background:color-mix(in oklch,var(--tier,var(--color-text-faint)) 14%,transparent);
+}
+.rank-pill-sm{font-weight:600}
+.rank-unranked{color:var(--color-text-faint);background:var(--color-surface-offset)}
+
+/* ── PROGRESS CARDS ────────────────────────────────────────────── */
+.pc-head{display:flex;align-items:flex-start;justify-content:space-between;
+  gap:var(--space-3);margin-bottom:var(--space-2)}
+.pc-sub{font-size:var(--text-xs);color:var(--color-text-muted);margin-top:2px}
+.pc-spark{margin:var(--space-2) 0 var(--space-3)}
+.spark{width:100%;height:28px;display:block}
+.pb-unit{font-size:var(--text-xs);color:var(--color-text-muted)}
+.pb-date{font-family:var(--font-body);font-size:var(--text-xs)}
+.pb-other .pb-label{font-style:italic}
+.delta-up{color:var(--color-success)}
+.delta-down{color:var(--color-text-muted)}
+.stale-flag{font-size:var(--text-xs);color:var(--color-orange);margin-left:var(--space-2)}
+.conf-flag{font-size:var(--text-xs);font-weight:500;margin-left:var(--space-2);
+  padding:1px var(--space-2);border-radius:var(--radius-full);
+  background:var(--color-surface-offset);color:var(--color-text-muted)}
+.conf-low{color:var(--color-orange)}
+.legacy-tag{font-size:var(--text-xs);font-weight:500;color:var(--color-text-faint);
+  border:1px solid var(--color-border);border-radius:var(--radius-full);
+  padding:0 var(--space-2);margin-left:var(--space-1)}
+.streak-none{background:var(--color-surface-offset);color:var(--color-text-muted)}
+
+/* ── VARIANT SELECT ────────────────────────────────────────────── */
+.exercise-title{display:flex;flex-direction:column;gap:var(--space-2);align-items:flex-start}
+.variant-select{font-size:var(--text-xs);padding:var(--space-1) var(--space-2);
+  min-height:32px;max-width:180px}
+
+/* ── FOOD: recents as chips ────────────────────────────────────── */
+.food-chips{display:flex;gap:var(--space-2);overflow-x:auto;padding-bottom:var(--space-2);
+  margin-bottom:var(--space-4);scrollbar-width:thin}
+.food-chip{
+  display:inline-flex;align-items:center;gap:var(--space-2);flex:0 0 auto;
+  max-width:190px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  padding:var(--space-2) var(--space-3);min-height:40px;
+  border:1px solid var(--color-border);border-radius:var(--radius-full);
+  background:var(--color-surface);color:var(--color-text);
+  font-size:var(--text-xs);font-weight:500;cursor:pointer;transition:var(--transition);
+}
+.food-chip:hover{border-color:var(--color-primary);color:var(--color-primary)}
+.chip-cal{font-family:var(--font-mono);color:var(--color-text-faint)}
+
+/* ── FOOD: sodium bar ──────────────────────────────────────────── */
+.food-na-row{display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-3)}
+.na-label{font-size:var(--text-xs);color:var(--color-text-muted);flex:0 0 auto}
+.food-bar-sm{flex:1;margin:0}
+.na-val{font-family:var(--font-mono);font-size:var(--text-xs);flex:0 0 auto}
+.na-target{color:var(--color-text-faint)}
+.food-bar-fill.na-ok{background:var(--color-success)}
+.food-bar-fill.na-near{background:var(--color-orange)}
+.food-bar-fill.na-over{background:var(--color-warning)}
+.na-val.na-over{color:var(--color-warning);font-weight:600}
+.na-val.na-near{color:var(--color-orange)}
+
+/* ── FOOD: micronutrients, shown by exception ──────────────────── */
+.micro-block{margin-top:var(--space-4);border-top:1px solid var(--color-divider);
+  padding-top:var(--space-3)}
+.micro-summary{font-size:var(--text-xs);cursor:pointer;color:var(--color-text-muted);
+  display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center}
+.micro-warn{color:var(--color-warning);font-weight:600}
+.micro-ok{color:var(--color-success);font-weight:600}
+.micro-untracked{color:var(--color-text-faint)}
+.micro-list{margin-top:var(--space-3);display:flex;flex-direction:column;gap:var(--space-1)}
+.micro-row{display:grid;grid-template-columns:1fr auto auto;gap:var(--space-3);
+  align-items:baseline;font-size:var(--text-xs);padding:var(--space-1) 0}
+.micro-row-flag .micro-name{font-weight:600;color:var(--color-text)}
+.micro-name{color:var(--color-text-muted)}
+.micro-src{font-size:10px;text-transform:uppercase;letter-spacing:.04em;
+  margin-left:var(--space-2);padding:0 var(--space-1);border-radius:var(--radius-sm);
+  background:var(--color-surface-offset);color:var(--color-text-faint)}
+.micro-src-label{color:var(--color-success)}
+.micro-val{font-family:var(--font-mono);color:var(--color-text)}
+.micro-pct{color:var(--color-text-muted);margin-left:var(--space-1)}
+.micro-cov{font-family:var(--font-mono);color:var(--color-text-faint);text-align:right}
+.micro-cov-low{color:var(--color-orange)}
+.micro-note{font-size:var(--text-xs);color:var(--color-text-faint);margin-top:var(--space-3);
+  line-height:1.5;max-width:64ch}
+
+/* ── FOOD: copy-day picker ─────────────────────────────────────── */
+.copy-day-list{display:flex;flex-direction:column;gap:var(--space-2)}
+.copy-day-option{display:flex;justify-content:space-between;align-items:center;
+  gap:var(--space-3);width:100%;padding:var(--space-3) var(--space-4);min-height:44px;
+  border:1px solid var(--color-border);border-radius:var(--radius-md);
+  background:var(--color-surface);color:var(--color-text);cursor:pointer;
+  font-size:var(--text-sm);transition:var(--transition)}
+.copy-day-option:hover{border-color:var(--color-primary);background:var(--color-surface-offset)}
+.cd-meta{font-size:var(--text-xs);color:var(--color-text-muted);font-family:var(--font-mono)}
+
+@media(max-width:480px){
+  .rank-tiles{grid-template-columns:repeat(2,1fr)}
+  .ro-right{align-items:flex-start;text-align:left}
+  .micro-row{grid-template-columns:1fr auto}
+  .micro-cov{grid-column:1/-1;text-align:left}
+}
+.micro-early{color:var(--color-text-muted)}
+
+/* ── MOBILE: the six-tab row has never fit at 375px ────────────────
+   Six tabs at desktop padding measure ~429px, which pushed the whole
+   body into a horizontal scroll. Tighten the tabs and let the row
+   itself scroll rather than the page. */
+@media(max-width:480px){
+  .tabs{overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{flex:0 0 auto;padding:var(--space-2) var(--space-3);font-size:var(--text-xs)}
+  .date-row{flex-wrap:wrap;gap:var(--space-2)}
+  .food-total-main{gap:var(--space-5)}
+  .food-na-row{flex-wrap:wrap}
+  .na-val{margin-left:auto}
+}
+/* Grid and flex children default to min-width:auto, so the widest descendant
+   stretches the whole page instead of being contained. This is what let the
+   six-tab row drag the entire document into a horizontal scroll — the tabs were
+   the trigger, but any wide content would have done it. */
+.app,.main,.tab-panel,.date-row,.food-totals{min-width:0}
+.main>*{min-width:0}

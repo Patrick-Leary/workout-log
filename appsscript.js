@@ -7,13 +7,47 @@
    Create a new deployment version any time you update this file.
 
    TABS THIS SCRIPT EXPECTS
-     Workouts   Date | Exercise | Set | Weight (lbs) | Reps | Saved At
+     Workouts   Date | Exercise | Set | Weight (lbs) | Reps | Saved At | Variant
      Weight     Date | Weight (lbs)
-     Foods      Key | Name | Brand | Serving | Cal | P | C | Fib | Fat | Sat | Na | Verified
-     Nutrition  Date | Meal | Key | Item | Qty | Cal | P | C | Fib | Fat | Sat | Na |
-                Source | Conf | Saved At
+     Foods      Key | Name | Brand | Serving | <nutrients> | Verified | MicroSrc
+     Nutrition  Date | Meal | Key | Item | Qty | <nutrients> | Source | Conf | Saved At
+   where <nutrients> is, in order:
+     Cal | P | C | Fib | Fat | Sat | Na | Trans | Chol | Sugar | AddSug |
+     VitD | Ca | Fe | Potassium | VitA | VitC | VitE | VitK | B6 | B12 |
+     Folate | Mg | Zn
    Foods and Nutrition are optional — the script degrades gracefully if absent.
+
+   COLUMNS ARE READ BY HEADER NAME, NOT POSITION. Reorder them, or insert your
+   own, and nothing breaks. Missing headers are added automatically on the next
+   write, so upgrading an existing sheet needs no manual work.
+
+   BLANK IS NOT ZERO. An empty nutrient cell reads as null, not 0, so the app
+   can report "53% of the day covered" instead of inventing a deficiency out of
+   a cell nobody has filled in yet.
    ============================================================= */
+
+// ── SCHEMA ────────────────────────────────────────────────────────────────
+// [sheet header, object key]. Keep in step with NUTRIENTS in scripts/app.js.
+var NUTRIENT_COLS = [
+  ["Cal", "cal"], ["P", "p"], ["C", "c"], ["Fib", "fib"], ["Fat", "fat"],
+  ["Sat", "sat"], ["Na", "na"], ["Trans", "trans"], ["Chol", "chol"],
+  ["Sugar", "sugar"], ["AddSug", "addsug"], ["VitD", "vitd"], ["Ca", "ca"],
+  ["Fe", "fe"], ["Potassium", "k"], ["VitA", "vita"], ["VitC", "vitc"],
+  ["VitE", "vite"], ["VitK", "vitk"], ["B6", "b6"], ["B12", "b12"],
+  ["Folate", "folate"], ["Mg", "mg"], ["Zn", "zn"]
+];
+
+function nutrientHeaders() {
+  return NUTRIENT_COLS.map(function (c) { return c[0]; });
+}
+
+var FOODS_HEADERS = ["Key", "Name", "Brand", "Serving"]
+  .concat(nutrientHeaders()).concat(["Verified", "MicroSrc"]);
+
+var NUTRITION_HEADERS = ["Date", "Meal", "Key", "Item", "Qty"]
+  .concat(nutrientHeaders()).concat(["Source", "Conf", "Saved At"]);
+
+var WORKOUT_HEADERS = ["Date", "Exercise", "Set", "Weight (lbs)", "Reps", "Saved At", "Variant"];
 
 // ── AUTH ──────────────────────────────────────────────────────────────────
 // Leave blank to keep the endpoint open (the original behaviour). Set it to a
@@ -65,43 +99,49 @@ function doGet(e) {
 }
 
 function getWorkouts() {
-  const sheet   = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Workouts");
-  if (!sheet) return [];
-  const lastRow = sheet.getLastRow();
-  if (lastRow <= 1) return [];
-
-  const rows       = sheet.getRange(2, 1, lastRow - 1, 6).getValues();
+  const t = readTable("Workouts");
+  if (!t) return [];
   const workoutMap = {};
 
-  rows.forEach(([date, exercise, setNum, weight, reps, savedAt]) => {
-    const dateStr = formatDateCell(date);
+  t.rows.forEach(function (row) {
+    const dateStr = formatDateCell(cell(row, t.col, "Date"));
     if (!dateStr) return;
+    const exercise = String(cell(row, t.col, "Exercise") || "");
+    if (!exercise) return;
+    const variant = String(cell(row, t.col, "Variant") || "");
 
     if (!workoutMap[dateStr]) {
       workoutMap[dateStr] = {
-        date:      dateStr,
-        savedAt:   String(savedAt || ""),
+        date:    dateStr,
+        savedAt: String(cell(row, t.col, "Saved At") || ""),
         exercises: {}
       };
     }
-
-    if (!workoutMap[dateStr].exercises[exercise]) {
-      workoutMap[dateStr].exercises[exercise] = {
-        id:   exerciseNameToId(String(exercise)),
-        name: String(exercise),
-        sets: []
+    // Keyed by exercise + variant: the same movement done two ways in one
+    // session is two entries, because they are not comparable.
+    const slot = exercise + "|" + variant;
+    if (!workoutMap[dateStr].exercises[slot]) {
+      workoutMap[dateStr].exercises[slot] = {
+        id:      exerciseNameToId(exercise),
+        name:    exercise,
+        variant: variant,
+        sets:    []
       };
     }
 
-    workoutMap[dateStr].exercises[exercise].sets.push({
-      weight: weight !== "" && weight !== null ? Number(weight) : null,
-      reps:   reps   !== "" && reps   !== null ? Number(reps)   : null
+    workoutMap[dateStr].exercises[slot].sets.push({
+      weight: numOrNull(cell(row, t.col, "Weight (lbs)")),
+      reps:   numOrNull(cell(row, t.col, "Reps"))
     });
   });
 
-  return Object.values(workoutMap)
-    .map(w => ({ ...w, exercises: Object.values(w.exercises) }))
-    .sort((a, b) => b.date.localeCompare(a.date));
+  return Object.keys(workoutMap)
+    .map(function (d) {
+      const w = workoutMap[d];
+      return { date: w.date, savedAt: w.savedAt,
+               exercises: Object.keys(w.exercises).map(function (k) { return w.exercises[k]; }) };
+    })
+    .sort(function (a, b) { return b.date.localeCompare(a.date); });
 }
 
 function getWeightLog() {
@@ -120,46 +160,45 @@ function getWeightLog() {
 // reads it to populate the picker; nothing writes to it from the app, so a
 // label correction here is a one-place edit.
 function getFoods() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Foods");
-  if (!sheet) return [];
-  const lastRow = sheet.getLastRow();
-  if (lastRow <= 1) return [];
+  const t = readTable("Foods");
+  if (!t) return [];
 
-  const cols = Math.min(12, sheet.getLastColumn());
-  return sheet.getRange(2, 1, lastRow - 1, cols).getValues()
-    .map(([key, name, brand, serving, cal, p, c, fib, fat, sat, na, verified]) => ({
-      key:      String(key || "").trim(),
-      name:     String(name || "").trim(),
-      brand:    String(brand || "").trim(),
-      serving:  String(serving || "").trim(),
-      cal: num(cal), p: num(p), c: num(c), fib: num(fib),
-      fat: num(fat), sat: num(sat), na: num(na),
-      verified: String(verified || "").trim().toLowerCase() === "yes",
-    }))
-    .filter(f => f.key && f.name);
+  return t.rows.map(function (row) {
+    const f = {
+      key:      String(cell(row, t.col, "Key")     || "").trim(),
+      name:     String(cell(row, t.col, "Name")    || "").trim(),
+      brand:    String(cell(row, t.col, "Brand")   || "").trim(),
+      serving:  String(cell(row, t.col, "Serving") || "").trim(),
+      verified: String(cell(row, t.col, "Verified") || "").trim().toLowerCase() === "yes",
+      microSrc: String(cell(row, t.col, "MicroSrc") || "").trim().toLowerCase()
+    };
+    const n = readNutrients(row, t.col);
+    Object.keys(n).forEach(function (k) { f[k] = n[k]; });
+    return f;
+  }).filter(function (f) { return f.key && f.name; });
 }
 
 function getNutrition(since) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Nutrition");
-  if (!sheet) return [];
-  const lastRow = sheet.getLastRow();
-  if (lastRow <= 1) return [];
+  const t = readTable("Nutrition");
+  if (!t) return [];
 
-  const cols = Math.min(15, sheet.getLastColumn());
-  return sheet.getRange(2, 1, lastRow - 1, cols).getValues()
-    .map(([date, meal, key, item, qty, cal, p, c, fib, fat, sat, na, source, conf, savedAt]) => ({
-      date:   formatDateCell(date),
-      meal:   String(meal || ""),
-      key:    String(key || ""),
-      name:   String(item || ""),
-      qty:    num(qty) || 1,
-      cal: num(cal), p: num(p), c: num(c), fib: num(fib),
-      fat: num(fat), sat: num(sat), na: num(na),
-      source: String(source || "manual"),
-      conf:   String(conf || ""),
-      savedAt: String(savedAt || ""),
-    }))
-    .filter(r => r.date && r.name && (!since || r.date >= since));
+  return t.rows.map(function (row) {
+    const r = {
+      date:    formatDateCell(cell(row, t.col, "Date")),
+      meal:    String(cell(row, t.col, "Meal") || ""),
+      key:     String(cell(row, t.col, "Key")  || ""),
+      name:    String(cell(row, t.col, "Item") || ""),
+      qty:     numOrNull(cell(row, t.col, "Qty")) || 1,
+      source:  String(cell(row, t.col, "Source") || "manual"),
+      conf:    String(cell(row, t.col, "Conf")   || ""),
+      savedAt: String(cell(row, t.col, "Saved At") || "")
+    };
+    const n = readNutrients(row, t.col);
+    Object.keys(n).forEach(function (k) { r[k] = n[k]; });
+    return r;
+  }).filter(function (r) {
+    return r.date && r.name && (!since || r.date >= since);
+  });
 }
 
 // ── POST — save or update ─────────────────────────────────────────────────
@@ -179,20 +218,22 @@ function doPost(e) {
     // ── Nutrition: replace the whole day, same upsert-by-date contract the
     //    workout path uses. Re-saving a date is always safe.
     if (data._type === "food") {
-      const sheet = ensureSheet("Nutrition", [
-        "Date", "Meal", "Key", "Item", "Qty", "Cal", "P", "C", "Fib",
-        "Fat", "Sat", "Na", "Source", "Conf", "Saved At"
-      ]);
+      const sheet = ensureSheet("Nutrition", NUTRITION_HEADERS);
       deleteRowsForDate(sheet, data.date);
 
       const savedAt = data.savedAt || new Date().toISOString();
-      (data.items || []).forEach(it => {
-        sheet.appendRow([
-          data.date, it.meal || "", it.key || "", it.name || "", it.qty ?? 1,
-          it.cal ?? "", it.p ?? "", it.c ?? "", it.fib ?? "",
-          it.fat ?? "", it.sat ?? "", it.na ?? "",
-          it.source || "manual", it.conf || "", savedAt
-        ]);
+      (data.items || []).forEach(function (it) {
+        const values = {
+          "Date": data.date, "Meal": it.meal || "", "Key": it.key || "",
+          "Item": it.name || "", "Qty": it.qty === undefined ? 1 : it.qty,
+          "Source": it.source || "manual", "Conf": it.conf || "", "Saved At": savedAt
+        };
+        // Undefined and null both stay blank — a nutrient nobody has filled in
+        // must not be written as a zero.
+        NUTRIENT_COLS.forEach(function (c) {
+          values[c[0]] = it[c[1]] === undefined ? null : it[c[1]];
+        });
+        sheet.appendRow(buildRow(sheet, values));
       });
       return respond({ status: "ok" });
     }
@@ -203,7 +244,7 @@ function doPost(e) {
       return respond({ status: "ok" });
     }
 
-    const sheet   = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Workouts");
+    const sheet   = ensureSheet("Workouts", WORKOUT_HEADERS);
     const lastRow = sheet.getLastRow();
 
     // Delete all workouts — wipe every row below the header
@@ -238,16 +279,18 @@ function doPost(e) {
     deleteRowsForDate(sheet, data.date);
 
     // Append one row per set
-    data.exercises.forEach(exercise => {
-      exercise.sets.forEach((set, i) => {
-        sheet.appendRow([
-          data.date,
-          exercise.name,
-          i + 1,
-          set.weight ?? "",
-          set.reps   ?? "",
-          data.savedAt || new Date().toISOString()
-        ]);
+    const wSaved = data.savedAt || new Date().toISOString();
+    data.exercises.forEach(function (exercise) {
+      exercise.sets.forEach(function (set, i) {
+        sheet.appendRow(buildRow(sheet, {
+          "Date": data.date,
+          "Exercise": exercise.name,
+          "Set": i + 1,
+          "Weight (lbs)": set.weight === undefined ? null : set.weight,
+          "Reps": set.reps === undefined ? null : set.reps,
+          "Saved At": wSaved,
+          "Variant": exercise.variant || ""
+        }));
       });
     });
 
@@ -259,6 +302,60 @@ function doPost(e) {
 }
 
 // ── HELPERS ───────────────────────────────────────────────────────────────
+
+// Read a sheet into rows plus a header-name -> column-index map, so every
+// reader below addresses columns by name. Returns null if the tab is absent
+// or holds nothing but a header.
+function readTable(name) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
+  if (!sheet) return null;
+  const lastRow = sheet.getLastRow(), lastCol = sheet.getLastColumn();
+  if (lastRow <= 1 || lastCol < 1) return null;
+
+  const header = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const col = {};
+  header.forEach(function (h, i) {
+    const key = String(h || "").trim();
+    if (key && !(key in col)) col[key] = i;
+  });
+  return { rows: sheet.getRange(2, 1, lastRow - 1, lastCol).getValues(), col: col };
+}
+
+// Cell value by header name. Missing column or blank cell -> undefined.
+function cell(row, col, name) {
+  const i = col[name];
+  if (i === undefined) return undefined;
+  const v = row[i];
+  return v === "" || v === null ? undefined : v;
+}
+
+// Blank stays blank. This is what lets the app distinguish "no magnesium in
+// this food" from "nobody has filled in magnesium yet" — collapsing the two to
+// 0 would manufacture deficiencies out of missing data.
+function numOrNull(v) {
+  if (v === "" || v === null || v === undefined) return null;
+  const n = Number(v);
+  return isNaN(n) ? null : n;
+}
+
+// Pull every nutrient column present into a flat object of key -> number|null.
+function readNutrients(row, col) {
+  const out = {};
+  NUTRIENT_COLS.forEach(function (c) { out[c[1]] = numOrNull(cell(row, col, c[0])); });
+  return out;
+}
+
+// Build a row array positioned by the sheet's own header order, so writes stay
+// correct no matter how the columns have been rearranged.
+function buildRow(sheet, values) {
+  const lastCol = sheet.getLastColumn();
+  const header  = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  return header.map(function (h) {
+    const key = String(h || "").trim();
+    return key in values && values[key] !== null && values[key] !== undefined
+      ? values[key] : "";
+  });
+}
 
 function respond(obj) {
   return ContentService
@@ -272,12 +369,27 @@ function num(v) {
   return isNaN(n) ? 0 : n;
 }
 
+// Create the sheet if absent; otherwise append any headers it is missing to
+// the end of the header row. Existing columns are never moved or renamed, so
+// upgrading a sheet full of data is non-destructive and needs no manual step.
 function ensureSheet(name, headers) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName(name);
   if (!sheet) {
     sheet = ss.insertSheet(name);
     sheet.appendRow(headers);
+    return sheet;
+  }
+
+  const lastCol = sheet.getLastColumn();
+  const existing = lastCol >= 1
+    ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) {
+        return String(h || "").trim();
+      })
+    : [];
+  const missing = headers.filter(function (h) { return existing.indexOf(h) === -1; });
+  if (missing.length) {
+    sheet.getRange(1, existing.length + 1, 1, missing.length).setValues([missing]);
   }
   return sheet;
 }
@@ -309,13 +421,31 @@ function formatDateCell(val) {
 
 // Map display names back to the IDs the app uses internally
 function exerciseNameToId(name) {
+  // Every exercise is listed explicitly. The lowercase/strip fallback below
+  // only agrees with the app's ids by coincidence, and where it didn't —
+  // "Romanian Deadlift" -> romaniandeadlift vs the app's `rdl`, and
+  // "Lateral Raise" -> lateralraise vs `latraise` — synced history silently
+  // failed to match its exercise. Add a row here whenever EXERCISES gains one.
   const map = {
-    "Leg Press":      "legpress",
-    "Chest Press":    "chestpress",
-    "Pull-Ups":       "pullups",
-    "Overhead Press": "ohpress",
-    "Dumbbell Rows":  "rows",
-    "Bicep Curls":    "curls"
+    "Leg Press":         "legpress",
+    "Chest Press":       "chestpress",
+    "Pull-Ups":          "pullups",
+    "Overhead Press":    "ohpress",
+    "Dumbbell Rows":     "rows",
+    "Bicep Curls":       "curls",
+    "Bench Press":       "bench",
+    "Push-Ups":          "pushups",
+    "Dips":              "dips",
+    "Lat Pulldown":      "latpulldown",
+    "Seated Row":        "seatedrow",
+    "Squat":             "squat",
+    "Split Squat":       "splitsquat",
+    "Romanian Deadlift": "rdl",
+    "Lateral Raise":     "latraise",
+    "Hammer Curl":       "hammercurl",
+    "Tricep Pulldown":   "triceppd",
+    "Leg Raise":         "legraise",
+    "Sit-Ups":           "situps"
   };
   return map[name] || name.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
