@@ -46,7 +46,9 @@ a self-deployed Apps Script web app. **Public repo**, deployed by GitHub Pages f
 - Mobile-first: test at ~375px; tap targets ≥40px.
 - No chart libraries; hand-rolled SVG/divs. Dark mode via `prefers-color-scheme` + CSS custom props.
 - Exercises are a constant at the top of `app.js`. Don't rotate or rename without asking — the
-  Progress tab keys history off the display name.
+  Progress tab keys history off the display name. When adding one, check the new name still
+  reduces to a unique id under `exerciseNameToId`'s lowercase/strip fallback in `appsscript.js`
+  (e.g. "Squat" -> `squat`, distinct from "Split Squat" -> `splitsquat`).
 
 ## Testing (no Node on the owner's Mac)
 - **JS syntax check**: JXA compiles without executing —
