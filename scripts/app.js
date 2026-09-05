@@ -33,8 +33,15 @@ const EXERCISES = [
   { id: "bench",       name: "Bench Press",       group: "Chest",     defaultSets: 3, repRange: [5, 10],  weighted: true,  weight: 1.0,
     variants: ["Smith", "Dumbbell", "Barbell"], perHand: true,
     std: { Barbell: "bench-bb", Smith: "bench-smith", Dumbbell: "bench-db" } },
+  // Range of motion is a variant, not a detail. Tested 2026-09-05: 25 reps at
+  // ~90 degrees vs 21 chest-to-floor, a 16% inflation. "To 90" is listed FIRST
+  // so unlabelled history — every set logged before that test — resolves to the
+  // partial it actually was, instead of being silently credited as full range.
+  // Only full ROM carries standards: Strength Level's rep figures assume it, so
+  // ranking a partial against them overstates the lift.
   { id: "pushups",     name: "Push-Ups",          group: "Chest",     defaultSets: 3, repRange: null,     weighted: false, weight: 0.75, amrap: true,
-    variants: ["Bodyweight"], std: { Bodyweight: "pushups" } },
+    variants: ["To 90\u00b0", "Full ROM"], std: { "Full ROM": "pushups" },
+    hint: "full ROM = chest within a fist of the floor" },
   { id: "dips",        name: "Dips",              group: "Chest",     defaultSets: 3, repRange: null,     weighted: false, weight: 1.0, amrap: true,
     variants: ["Bodyweight", "Weighted"], std: {} },
 
