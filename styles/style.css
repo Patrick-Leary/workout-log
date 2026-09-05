@@ -721,3 +721,16 @@ a,button,[role="button"],input,select{
    the trigger, but any wide content would have done it. */
 .app,.main,.tab-panel,.date-row,.food-totals{min-width:0}
 .main>*{min-width:0}
+
+/* ── HEADLINE PATTERN SLOTS ────────────────────────────────────── */
+.pattern-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));
+  gap:var(--space-2);margin-bottom:var(--space-4)}
+.pattern-slot{display:flex;flex-direction:column;gap:1px;padding:var(--space-2) var(--space-3);
+  border-radius:var(--radius-md);background:var(--color-surface);
+  border:1px solid var(--color-border);border-top:2px solid var(--tier,var(--color-divider))}
+.pattern-empty{opacity:.5}
+.ps-name{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted)}
+.ps-tier{font-size:var(--text-sm);font-weight:700;color:var(--tier,var(--color-text-faint))}
+.ps-via{font-size:10px;color:var(--color-text-faint);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+@media(max-width:480px){.pattern-row{grid-template-columns:repeat(2,1fr)}}

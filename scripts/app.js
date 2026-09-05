@@ -8,9 +8,20 @@
 // Muscle groups. Order drives the Progress tiles.
 const GROUPS = ["Chest", "Back", "Legs", "Shoulders", "Arms", "Core"];
 
-// The five lifts the headline rank is built from. Isolation and machine work
-// still gets its own per-exercise rank, but must not inflate the overall.
-const BIG_FIVE = ["bench", "squat", "ohpress", "rows", "latpulldown"];
+// The headline rank is built from five movement PATTERNS, not five named lifts.
+//
+// Naming specific barbell lifts assumed a barbell program. Patrick trains in a
+// building gym with a Smith machine and no spotter, so barbell bench and back
+// squat may never happen — and a headline keyed to them would have sat pinned
+// at zero forever while he trained perfectly well. A pattern is satisfied by
+// whichever exercise he actually does; each slot takes its best-ranked member.
+const HEADLINE_PATTERNS = [
+  { name: "Horizontal push", ids: ["bench", "dips", "pushups"] },
+  { name: "Vertical push",   ids: ["ohpress"] },
+  { name: "Horizontal pull", ids: ["rows", "seatedrow"] },
+  { name: "Vertical pull",   ids: ["pullups", "latpulldown"] },
+  { name: "Legs",            ids: ["squat", "legpress", "splitsquat"] },
+];
 
 // Exercise catalogue — matches the building gym downstairs (2026-09-05).
 //   group     which muscle-group tile it feeds
@@ -20,7 +31,8 @@ const BIG_FIVE = ["bench", "squat", "ohpress", "rows", "latpulldown"];
 const EXERCISES = [
   // ── Chest ───────────────────────────────────────────────────────────────
   { id: "bench",       name: "Bench Press",       group: "Chest",     defaultSets: 3, repRange: [5, 10],  weighted: true,  weight: 1.0,
-    variants: ["Barbell", "Dumbbell", "Smith"], std: { Barbell: "bench-bb" } },
+    variants: ["Smith", "Dumbbell", "Barbell"], perHand: true,
+    std: { Barbell: "bench-bb", Smith: "bench-smith", Dumbbell: "bench-db" } },
   { id: "pushups",     name: "Push-Ups",          group: "Chest",     defaultSets: 3, repRange: null,     weighted: false, weight: 0.75, amrap: true,
     variants: ["Bodyweight"], std: { Bodyweight: "pushups" } },
   { id: "dips",        name: "Dips",              group: "Chest",     defaultSets: 3, repRange: null,     weighted: false, weight: 1.0, amrap: true,
@@ -38,7 +50,8 @@ const EXERCISES = [
 
   // ── Legs ────────────────────────────────────────────────────────────────
   { id: "squat",       name: "Squat",             group: "Legs",      defaultSets: 3, repRange: [5, 10],  weighted: true,  weight: 1.0,
-    variants: ["Barbell", "Smith", "Dumbbell", "Bodyweight"], std: { Barbell: "squat-bb" },
+    variants: ["Smith", "Barbell", "Dumbbell", "Bodyweight"],
+    std: { Barbell: "squat-bb", Smith: "squat-smith" },
     hint: "enter 0 for bodyweight" },
   { id: "legpress",    name: "Leg Press",         group: "Legs",      defaultSets: 3, repRange: [10, 12], weighted: true,  weight: 0.75,
     variants: ["Machine"], std: { Machine: "legpress" } },
@@ -99,7 +112,10 @@ const Z_ANCHORS   = [-1.6449, -0.8416, 0, 0.8416, 1.6449];
 
 const STANDARDS = {
   "squat-bb":       { kind: "weight", v: [106, 153, 211, 279, 352] },
+  "squat-smith":    { kind: "weight", v: [ 80, 129, 193, 270, 355] },
   "bench-bb":       { kind: "weight", v: [ 80, 114, 156, 205, 258] },
+  "bench-smith":    { kind: "weight", v: [ 78, 112, 155, 205, 258] },
+  "bench-db":       { kind: "weight", v: [ 27,  43,  65,  91, 120] },
   "ohp-bb":         { kind: "weight", v: [ 45,  68,  98, 133, 172] },
   "ohp-db":         { kind: "weight", v: [ 20,  33,  50,  70,  93] },
   "row-db":         { kind: "weight", v: [ 26,  44,  69,  99, 133] },
@@ -1381,16 +1397,22 @@ function groupRank(group) {
            decayed: rs.some(r => r.lost > 0) };
 }
 
-// Headline: the big five only. Empty slots are what make "Bronze" honest for
-// someone who has never benched or squatted.
+// Headline: one slot per movement pattern, each filled by its best-ranked
+// exercise. Unfilled slots count as rung 0 rather than being skipped — that is
+// what keeps "Bronze" honest for someone with three patterns untrained, instead
+// of letting one strong lift carry the whole score.
 function overallRank() {
-  const rs = allRanks().filter(r => BIG_FIVE.includes(r.id) && r.ranked);
-  const missing = BIG_FIVE.filter(id => !rs.some(r => r.id === id));
-  if (!rs.length) return { rung: 0, ...rungToTier(0), count: 0, missing };
-  // Untrained big-five lifts count as rung 0 rather than being skipped —
-  // otherwise a single strong lift would read as a high overall rank.
-  const rung = rs.reduce((s, r) => s + r.rung, 0) / BIG_FIVE.length;
-  return { ...rungToTier(rung), count: rs.length, missing };
+  const ranks = allRanks();
+  const slots = HEADLINE_PATTERNS.map(p => {
+    const candidates = ranks.filter(r => p.ids.includes(r.id) && r.ranked);
+    if (!candidates.length) return { pattern: p.name, rung: 0, filled: false };
+    const best = candidates.reduce((a, b) => (b.rung > a.rung ? b : a));
+    return { pattern: p.name, rung: best.rung, filled: true,
+             via: best.name, tier: best.tier, division: best.division };
+  });
+  const rung    = slots.reduce((s, x) => s + x.rung, 0) / slots.length;
+  const missing = slots.filter(s => !s.filled).map(s => s.pattern);
+  return { ...rungToTier(rung), slots, missing, count: slots.length - missing.length };
 }
 
 // ── PROGRESS ──────────────────────────────────────────────────────────────
@@ -1564,10 +1586,6 @@ function renderProgress() {
 // down — the isolation lifts get their own tiles and can't inflate it.
 function renderRanks() {
   const o = overallRank();
-  const missingNames = o.missing.map(id => {
-    const ex = EXERCISES.find(e => e.id === id);
-    return ex ? ex.name : id;
-  });
 
   const tiles = GROUPS.map(g => {
     const gr = groupRank(g);
@@ -1597,15 +1615,25 @@ function renderRanks() {
           <span class="ro-tier">${o.tier} ${o.division}</span>
         </div>
         <div class="ro-right">
-          <span class="ro-basis">from the big five</span>
+          <span class="ro-basis">${o.count}/5 movement patterns trained</span>
           ${o.missing.length
-            ? `<span class="ro-missing">no data yet: ${esc(missingNames.join(", "))}</span>`
-            : `<span class="ro-basis">all five logged</span>`}
+            ? `<span class="ro-missing">nothing logged for: ${esc(o.missing.join(", "))}</span>`
+            : `<span class="ro-basis">all five patterns covered</span>`}
         </div>
+      </div>
+      <div class="pattern-row">
+        ${o.slots.map(s => `
+          <div class="pattern-slot${s.filled ? " " + tierClass(s.tier) : " pattern-empty"}">
+            <span class="ps-name">${esc(s.pattern)}</span>
+            <span class="ps-tier">${s.filled ? `${s.tier} ${s.division}` : "—"}</span>
+            <span class="ps-via">${s.filled ? esc(s.via) : "untrained"}</span>
+          </div>`).join("")}
       </div>
       <div class="rank-tiles">${tiles}</div>
       <p class="rank-note">
-        Percentiles are against <strong>people who log lifts on Strength Level</strong> —
+        The headline is one slot per movement pattern, each filled by whatever you actually
+        train for it — Smith or dumbbell bench both count as horizontal push, leg press counts
+        as legs. Percentiles are against <strong>people who log lifts on Strength Level</strong> —
         a committed population, well above average. Thresholds scale with bodyweight,
         so this measures strength <em>per pound</em>. Untrained groups slip after
         ${DECAY.graceDays} days as an upkeep rule, not a claim that you got weaker —

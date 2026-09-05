@@ -92,9 +92,12 @@ Logged set -> Epley e1RM -> population percentile -> tier + division.
   dropping meaningfully past ~4. `DECAY` slips a division per 5 days after a 7-day grace, floored
   at one tier, purely for motivation — and training the group replaces the estimate with a real
   measurement immediately. The UI must keep saying it's an upkeep rule.
-- The **overall** rank uses only `BIG_FIVE`, counting untrained lifts as rung 0. That's what makes
-  "Bronze" honest for someone who has never benched or squatted, and stops isolation work (whose
-  standards are much softer) from inflating the headline.
+- The **overall** rank is five movement **patterns** (`HEADLINE_PATTERNS`), not five named lifts,
+  each filled by its best-ranked member and counting untrained patterns as rung 0. Naming specific
+  barbell lifts assumed a barbell program — the owner trains in a building gym with a Smith machine
+  and usually no spotter, so barbell bench and back squat may never happen. A headline keyed to
+  them would have sat pinned near zero while he trained perfectly well. Smith or dumbbell bench
+  both satisfy horizontal push; leg press satisfies legs.
 
 ## Testing (no Node on the owner's Mac)
 - **JS syntax check**: JXA compiles without executing —
