@@ -226,6 +226,19 @@
       </div>
 
       <div class="settings-group">
+        <div class="settings-group-title">Food database</div>
+        <p class="settings-desc">
+          Logged rows store their own values, so history stays a record rather than a view.
+          When a database number was simply <em>wrong</em>, this propagates the fix — it shows
+          what differs and refreshes only what you approve.
+        </p>
+        <p class="settings-desc" id="drift-status">Checking…</p>
+        <div class="field-row">
+          <button class="btn btn-ghost" onclick="openDriftReview()">Review differences</button>
+        </div>
+      </div>
+
+      <div class="settings-group">
         <div class="settings-group-title">Queue</div>
         <p class="settings-desc" id="queue-status">Checking queue…</p>
         <div class="field-row">

@@ -50,6 +50,16 @@ have label-verified macros beside looked-up micros.
 - **Nutrition is item-level.** Day totals are derivable; the reverse is not.
 - **Logged rows store totals for the quantity**, not per-serving — a later label correction must not
   rewrite history. `foodBase()` re-derives per-serving values only when changing quantity.
+- **Logged rows store totals; `refreshDay()` is how a correction reaches history.** Storing rather
+  than referencing keeps the log a record — the scale arbitrates against what was eaten, so past
+  intake must not shift when a food row is edited. But when a stored number was simply *wrong*, the
+  fix has to propagate: `scanDrift()` compares every keyed row against the current database and
+  `refreshDay()` rewrites the approved ones. A correction should propagate, a reformulation should
+  not, and only the owner can tell which — so the app asks rather than deciding.
+- **Not everything can be linked anyway.** Roughly a third of logged rows (restaurant, cafeteria)
+  have no `Key`, so the storage path has to exist regardless.
+- **A partially covered total is a floor, not an estimate**, and renders with a `>=`. Coverage alone
+  says a number is *incomplete*; it does not say it is an *undercount*, which is the part that matters.
 - **`foodDirty` protects unsaved work.** `fetchFromSheets` replaces local state wholesale, so days
   with local edits are held back from that overwrite. Without it, items added and not yet saved were
   silently discarded on the next sync — the worst bug this app has had.

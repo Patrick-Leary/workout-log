@@ -173,7 +173,10 @@ const NUTRIENTS = [
   { key: "sat",    label: "Sat fat",       unit: "g",   dv: 20,   src: "label", goal: "cap",  core: true },
   { key: "na",     label: "Sodium",        unit: "mg",  dv: 2300, src: "label", goal: "cap",  core: true, target: 2750 },
   { key: "trans",  label: "Trans fat",     unit: "g",   dv: 0,    src: "label", goal: "cap"  },
-  { key: "chol",   label: "Cholesterol",   unit: "mg",  dv: 300,  src: "label", goal: "cap"  },
+  // Recorded but not scored. The 2015 Dietary Guidelines dropped the 300mg
+  // limit and dietary cholesterol's effect on serum lipids is weak; flagging it
+  // daily for a 23-year-old with no lipid concern is noise, not a finding.
+  { key: "chol",   label: "Cholesterol",   unit: "mg",  dv: 300,  src: "label", goal: null   },
   { key: "sugar",  label: "Total sugars",  unit: "g",   dv: 0,    src: "label", goal: null   },
   { key: "addsug", label: "Added sugars",  unit: "g",   dv: 50,   src: "label", goal: "cap"  },
   { key: "vitd",   label: "Vitamin D",     unit: "mcg", dv: 20,   src: "label", goal: "hit"  },
@@ -1992,6 +1995,144 @@ function copyDay(fromDate) {
   showToast(`Copied ${items.length} item(s) from ${formatDate(fromDate)}`);
 }
 
+// ── FOOD: refresh logged rows from the database ───────────────────────────
+/* Logged rows store totals rather than referencing the Foods tab, so a database
+   correction does not reach history on its own. That is deliberate — see the
+   project CLAUDE.md — but it leaves a real gap: when the stored number was
+   simply WRONG (mis-transcribed, wrong product), you want the fix to propagate.
+
+   This is the answer to that. It compares every keyed row against the current
+   database, shows exactly what differs, and refreshes only what you approve.
+   The distinction that matters: a correction should propagate, a reformulation
+   should not, and only the owner can tell which is which — so the app asks. */
+
+const DRIFT_EPSILON = 0.05;
+
+// What a row WOULD hold if recomputed from today's database.
+function currentValuesFor(it) {
+  const f = it.key ? foods.find(x => x.key === it.key) : null;
+  if (!f) return null;
+  const qty = Number(it.qty) || 1;
+  const out = {};
+  FOOD_MACROS.forEach(k => {
+    const v = f[k];
+    out[k] = (v === null || v === undefined || v === "")
+      ? (CORE_MACROS.includes(k) ? 0 : null)
+      : Math.round(Number(v) * qty * 10) / 10;
+  });
+  return out;
+}
+
+function rowDrift(it) {
+  const cur = currentValuesFor(it);
+  if (!cur) return null;
+  const diffs = [];
+  FOOD_MACROS.forEach(k => {
+    const a = it[k] === undefined ? null : it[k];
+    const b = cur[k];
+    if (a === null && b === null) return;
+    // Gaining a value where there was none is a difference worth showing.
+    if (a === null || b === null) { diffs.push({ k, from: a, to: b }); return; }
+    if (Math.abs(Number(a) - Number(b)) > DRIFT_EPSILON) diffs.push({ k, from: a, to: b });
+  });
+  return diffs.length ? { item: it, diffs, cur } : null;
+}
+
+function scanDrift() {
+  const byDate = {};
+  nutrition.forEach(it => {
+    if (!it.key) return;            // free-text rows have nothing to compare to
+    const d = rowDrift(it);
+    if (!d) return;
+    (byDate[it.date] = byDate[it.date] || []).push(d);
+  });
+  return byDate;
+}
+
+function labelFor(key) {
+  const n = NUTRIENTS.find(x => x.key === key);
+  return n ? n.label : key;
+}
+
+function openDriftReview() {
+  const byDate = scanDrift();
+  const dates = Object.keys(byDate).sort((a, b) => b.localeCompare(a));
+  if (!dates.length) {
+    showConfirmHtml("Refresh from database",
+      `<p class="drift-none">Every logged item matches the food database. Nothing to refresh.</p>`);
+    return;
+  }
+
+  const total = dates.reduce((s, d) => s + byDate[d].length, 0);
+  const body = dates.map(d => {
+    const rows = byDate[d].map(r => `
+      <div class="drift-item">
+        <span class="di-name">${esc(r.item.name)}${Number(r.item.qty) !== 1 ? ` ×${esc(r.item.qty)}` : ""}</span>
+        <span class="di-diffs">${r.diffs.slice(0, 4).map(x =>
+          `${esc(labelFor(x.k))} ${x.from === null ? "—" : fmtNum(x.from)} → ${x.to === null ? "—" : fmtNum(x.to)}`
+        ).join(" · ")}${r.diffs.length > 4 ? ` +${r.diffs.length - 4} more` : ""}</span>
+      </div>`).join("");
+    return `
+      <div class="drift-day">
+        <div class="drift-day-head">
+          <span>${formatDate(d)} — ${byDate[d].length} item(s)</span>
+          <button class="btn btn-ghost btn-sm" onclick="refreshDay('${d}')">Refresh</button>
+        </div>
+        ${rows}
+      </div>`;
+  }).join("");
+
+  showConfirmHtml("Refresh from database", `
+    <p class="drift-lead">${total} logged item(s) across ${dates.length} day(s) differ from the
+      current food database. Refreshing rewrites those rows to today's values — right when the
+      original number was a mistake, wrong when the food itself changed since.</p>
+    <div class="drift-list">${body}</div>
+    <div class="drift-actions">
+      <button class="btn btn-primary btn-sm" onclick="refreshAllDrift()">Refresh all ${dates.length} day(s)</button>
+    </div>`);
+}
+
+function refreshDay(date, silent = false) {
+  let changed = 0;
+  nutrition.forEach(it => {
+    if (it.date !== date || !it.key) return;
+    const d = rowDrift(it);
+    if (!d) return;
+    FOOD_MACROS.forEach(k => { it[k] = d.cur[k]; });
+    changed++;
+  });
+  if (!changed) return 0;
+  markFoodDirty(date);
+  persist();
+  if (!silent) {
+    closeModal();
+    renderFoodTab();
+    showToast(`Refreshed ${changed} item(s) on ${formatDate(date)} — press Save Day to sync`);
+  }
+  return changed;
+}
+
+function refreshAllDrift() {
+  const dates = Object.keys(scanDrift());
+  let n = 0;
+  dates.forEach(d => { n += refreshDay(d, true); });
+  closeModal();
+  renderFoodTab();
+  showToast(`Refreshed ${n} item(s) across ${dates.length} day(s) — save each day to sync`);
+}
+
+// Settings shows the count so drift is visible without going looking for it.
+function updateDriftStatus() {
+  const el = document.getElementById("drift-status");
+  if (!el) return;
+  const byDate = scanDrift();
+  const days = Object.keys(byDate).length;
+  const items = Object.values(byDate).reduce((s, a) => s + a.length, 0);
+  el.textContent = days
+    ? `${items} logged item(s) across ${days} day(s) differ from the food database.`
+    : "Every logged item matches the food database.";
+}
+
 // ── FOOD: render ──────────────────────────────────────────────────────────
 
 function renderFoodTab() {
@@ -2072,7 +2213,7 @@ function renderFoodTotals() {
 // Track everything, display by exception. Only nutrients that are actually off
 // target surface; the rest stay folded away so the tab stays readable.
 function renderMicroSummary(items, t, isToday) {
-  const micros = NUTRIENTS.filter(n => !n.core && n.dv > 0);
+  const micros = NUTRIENTS.filter(n => !n.core);
   if (!micros.length) return "";
 
   // Same clock rule as calories and protein. Judging a micronutrient against
@@ -2084,10 +2225,10 @@ function renderMicroSummary(items, t, isToday) {
   const rows = micros.map(n => {
     const cov = nutrientCoverage(items, n.key);
     const val = Number(t[n.key]) || 0;
-    const pct = (val / n.dv) * 100;
+    const pct = n.dv > 0 ? (val / n.dv) * 100 : null;
     // Compare against how much of the DV should be in by now, not the whole DV.
-    const low  = n.goal === "hit" && val < n.dv * progress * 0.7;
-    const over = n.goal === "cap" && pct > 100;
+    const low  = n.goal === "hit" && n.dv > 0 && val < n.dv * progress * 0.7;
+    const over = n.goal === "cap" && n.dv > 0 && pct > 100;
     // Under half the day's calories covered means the number is missing data,
     // not evidence of a shortfall — never flag on that.
     return { n, cov, val, pct, flagged: !tooEarly && (low || over) && cov > 0.5 };
@@ -2110,8 +2251,8 @@ function renderMicroSummary(items, t, isToday) {
     <div class="micro-row${r.flagged ? " micro-row-flag" : ""}">
       <span class="micro-name">${esc(r.n.label)}
         <span class="micro-src micro-src-${esc(r.n.src)}">${esc(r.n.src)}</span></span>
-      <span class="micro-val">${fmtNum(r.val)}${esc(r.n.unit)}
-        <span class="micro-pct">${Math.round(r.pct)}% DV</span></span>
+      <span class="micro-val">${r.cov < 0.95 ? `<span class="micro-floor" title="Some of today's food carries no value for this nutrient, so the real total is this or higher">≥</span>` : ""}${fmtNum(r.val)}${esc(r.n.unit)}
+        ${r.pct != null ? `<span class="micro-pct">${Math.round(r.pct)}% DV</span>` : ""}</span>
       <span class="micro-cov${r.cov < 0.5 ? " micro-cov-low" : ""}">${Math.round(r.cov * 100)}% covered</span>
     </div>`).join("");
 
@@ -2123,7 +2264,9 @@ function renderMicroSummary(items, t, isToday) {
       <div class="micro-list">${detail}</div>
       <p class="micro-note">“Covered” is the share of today’s calories from foods
         that actually carry a value for that nutrient. A blank cell is not a zero —
-        low coverage means missing data, not a deficiency.</p>
+        low coverage means missing data, not a deficiency. <strong>≥</strong> marks a
+        total that is a floor rather than a measurement: the real figure is that or
+        higher, because part of the day carries no value for it.</p>
     </details>`;
 }
 
@@ -2228,6 +2371,7 @@ function renderSettings() {
   if (secret) secret.value = sheetsSecret;
   const goal = document.getElementById("weight-goal");
   if (goal) goal.value = weightGoal;
+  updateDriftStatus();
   updateQueueStatus();
 }
 
