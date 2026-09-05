@@ -14,6 +14,7 @@ const EXERCISES = [
   { id: "curls",      name: "Bicep Curls",       tag: "Arms",      defaultSets: 2, repRange: [12, 15], weighted: true  },
   // Home / dumbbell block — no gym required
   { id: "pushups",    name: "Push-Ups",          tag: "Chest",     defaultSets: 3, repRange: null,     weighted: false, amrap: true },
+  { id: "squat",      name: "Squat",             tag: "Legs",      defaultSets: 3, repRange: [10, 15], weighted: true,  hint: "enter 0 for bodyweight" },
   { id: "splitsquat", name: "Split Squat",       tag: "Legs",      defaultSets: 3, repRange: [8, 10],  weighted: true,  perSide: true, hint: "per leg · enter 0 for bodyweight" },
   { id: "rdl",        name: "Romanian Deadlift", tag: "Legs",      defaultSets: 3, repRange: [10, 12], weighted: true  },
   { id: "latraise",   name: "Lateral Raise",     tag: "Shoulders", defaultSets: 3, repRange: [10, 12], weighted: true  },
