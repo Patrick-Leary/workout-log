@@ -129,6 +129,14 @@ Logged set -> Epley e1RM -> population percentile -> tier + division.
   Naming specific barbell lifts assumed a barbell program — the owner trains in a building gym
   with a Smith machine and usually no spotter, so barbell bench and back squat may never happen.
   Smith or dumbbell bench both satisfy horizontal push; leg press satisfies legs.
+- ⚠️ **`perHand` is PER VARIANT, not per exercise** (`isPerHand(ex, variant)`). Bench is Smith /
+  Barbell / Dumbbell in one entry: the first two are total bar weight, the third is per hand, and
+  Strength Level quotes each the same way. A blanket `perHand: true` mislabels two thirds of them.
+  **This produced a real wrong rank on 2026-09-06:** a Bulgarian split squat done with two 15s was
+  logged as `30` and scored against a per-dumbbell curve — Platinum 3 instead of Silver 3, a clean
+  2x inflation that then carried the whole Legs group *and* its movement-pattern slot, because the
+  grace period had excluded the other two leg lifts. The weight input's placeholder now reads
+  `lb/hand` on per-hand variants; keep it that way, a sub-label alone was not enough.
 - **`lockedVariant` hides the variant picker and pins new sets to one variant** (push-ups → Full
   ROM). The variants *list* stays, because that is how history is read: sets logged before
   2026-09-05 carry no variant and resolve to `variants[0]`, the partial they actually were.

@@ -31,7 +31,8 @@ const HEADLINE_PATTERNS = [
 const EXERCISES = [
   // ── Chest ───────────────────────────────────────────────────────────────
   { id: "bench",       name: "Bench Press",       group: "Chest",     defaultSets: 3, repRange: [5, 10],  weighted: true,  weight: 1.0,
-    variants: ["Smith", "Dumbbell", "Barbell"], perHand: true,
+    // Smith and Barbell are total bar weight; only the dumbbell version is per hand.
+    variants: ["Smith", "Dumbbell", "Barbell"], perHand: ["Dumbbell"],
     std: { Barbell: "bench-bb", Smith: "bench-smith", Dumbbell: "bench-db" } },
   // Range of motion is a variant, not a detail. Tested 2026-09-05: 25 reps at
   // ~90 degrees vs 21 chest-to-floor, a 16% inflation. "To 90" is listed FIRST
@@ -62,17 +63,19 @@ const EXERCISES = [
     variants: ["Cable"], std: { Cable: "latpulldown" } },
   { id: "seatedrow",   name: "Seated Row",        group: "Back",      defaultSets: 3, repRange: [8, 12],  weighted: true,  weight: 0.75,
     variants: ["Cable"], std: { Cable: "seatedrow" } },
-  { id: "rows",        name: "Dumbbell Rows",      group: "Back",      defaultSets: 3, repRange: [8, 12],  weighted: true,  weight: 1.0, perSide: true, perHand: true,
+  { id: "rows",        name: "Dumbbell Rows",      group: "Back",      defaultSets: 3, repRange: [8, 12],  weighted: true,  weight: 1.0, perSide: true, perHand: ["Dumbbell"],
     variants: ["Dumbbell", "Barbell"], std: { Dumbbell: "row-db" } },
 
   // ── Legs ────────────────────────────────────────────────────────────────
   { id: "squat",       name: "Squat",             group: "Legs",      defaultSets: 3, repRange: [5, 10],  weighted: true,  weight: 1.0,
+    // Smith and Barbell are total bar weight; the dumbbell version is per hand.
+    perHand: ["Dumbbell"],
     variants: ["Smith", "Barbell", "Dumbbell", "Bodyweight"],
-    std: { Barbell: "squat-bb", Smith: "squat-smith" },
-    hint: "enter 0 for bodyweight" },
+    std: { Barbell: "squat-bb", Smith: "squat-smith", Dumbbell: "squat-db" },
+    hint: "leave blank for bodyweight" },
   { id: "legpress",    name: "Leg Press",         group: "Legs",      defaultSets: 3, repRange: [10, 12], weighted: true,  weight: 0.75,
     variants: ["Machine"], std: { Machine: "legpress" } },
-  { id: "rdl",         name: "Romanian Deadlift", group: "Legs",      defaultSets: 3, repRange: [8, 12],  weighted: true,  weight: 1.0, perHand: true,
+  { id: "rdl",         name: "Romanian Deadlift", group: "Legs",      defaultSets: 3, repRange: [8, 12],  weighted: true,  weight: 1.0, perHand: ["Dumbbell"],
     variants: ["Dumbbell", "Barbell"], std: { Dumbbell: "rdl-db" } },
   { id: "splitsquat",  name: "Split Squat",       group: "Legs",      defaultSets: 3, repRange: [8, 10],  weighted: true,  weight: 1.0, perSide: true,
     // perHand added so the entry convention matches the standard, which is
@@ -81,19 +84,20 @@ const EXERCISES = [
     // "Bulgarian Split Squat" is a BARBELL lift (143 lb average), not a rep
     // count, so there is no published curve for the unloaded version. Ranking
     // it against anything would be invention.
-    perHand: true,
+    perHand: ["Dumbbell"],
     variants: ["Dumbbell", "Bodyweight"], std: { Dumbbell: "splitsquat-db" },
-    hint: "per leg · weight per dumbbell · leave blank for bodyweight" },
+    hint: "per leg · Bulgarian (rear foot elevated) · leave blank for bodyweight" },
 
   // ── Shoulders ───────────────────────────────────────────────────────────
   { id: "ohpress",     name: "Overhead Press",    group: "Shoulders", defaultSets: 3, repRange: [5, 10],  weighted: true,  weight: 1.0,
     variants: ["Barbell", "Dumbbell"], std: { Barbell: "ohp-bb", Dumbbell: "ohp-db" } },
-  { id: "latraise",    name: "Lateral Raise",     group: "Shoulders", defaultSets: 3, repRange: [10, 12], weighted: true,  weight: 0.5, perHand: true,
+  { id: "latraise",    name: "Lateral Raise",     group: "Shoulders", defaultSets: 3, repRange: [10, 12], weighted: true,  weight: 0.5,
+    perHand: ["Dumbbell seated", "Dumbbell standing"],
     variants: ["Dumbbell seated", "Dumbbell standing", "Cable"],
     std: { "Dumbbell seated": "latraise-db", "Dumbbell standing": "latraise-db", Cable: "latraise-db" } },
 
   // ── Arms ────────────────────────────────────────────────────────────────
-  { id: "curls",       name: "Bicep Curls",       group: "Arms",      defaultSets: 3, repRange: [10, 15], weighted: true,  weight: 0.5, perHand: true,
+  { id: "curls",       name: "Bicep Curls",       group: "Arms",      defaultSets: 3, repRange: [10, 15], weighted: true,  weight: 0.5, perHand: ["Dumbbell"],
     variants: ["Dumbbell", "Barbell", "Cable"], std: { Dumbbell: "curl-db" } },
   { id: "hammercurl",  name: "Hammer Curl",       group: "Arms",      defaultSets: 3, repRange: [10, 15], weighted: true,  weight: 0.5, perHand: true,
     variants: ["Dumbbell"], std: { Dumbbell: "hammercurl-db" } },
@@ -167,7 +171,10 @@ const STANDARDS = {
   "dips":           { kind: "reps",   v: [0.5,   1,   9,  19,  30] },
   "legraise-hang":  { kind: "reps",   v: [0.5,   7,  14,  24,  34] },
   "situps":         { kind: "reps",   v: [0.5,  16,  44,  79, 118] },
+  // ⚠️ Strength Level's BULGARIAN split squat (rear foot elevated). A flat-footed
+  // split squat is an easier movement and this curve would over-rate it.
   "splitsquat-db":  { kind: "weight", v: [ 15,  27,  44,  65,  89] },
+  "squat-db":       { kind: "weight", v: [ 13,  26,  44,  68,  94] },
   // ⚠️ WEAKER THAN THE REST. A cable pushdown percentile depends on the
   // machine's pulley ratio, so the same effort reads differently on different
   // stacks. Treat this rank as indicative, not comparable to the dumbbell ones.
@@ -315,15 +322,35 @@ function numOrNull(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+/* Is the weight for THIS variant entered per dumbbell?
+
+   ⚠️ This has to be per-variant, not per-exercise. Bench is Smith / Barbell /
+   Dumbbell under one exercise: the first two are total bar weight and the third
+   is per hand, and Strength Level quotes each the same way. A single
+   `perHand: true` on the exercise mislabels two thirds of them.
+
+   This is not cosmetic. On 2026-09-06 a Bulgarian split squat logged as "30"
+   (two 15s) was scored against a per-dumbbell standard and came back Platinum 3
+   instead of Silver 3 — a clean 2x inflation that then carried the whole Legs
+   group and its movement-pattern slot, because the grace period had excluded
+   the two other leg lifts.
+
+   `perHand: true` still means every variant; an array names the ones it
+   applies to.                                                               */
+function isPerHand(ex, variant) {
+  if (!ex || !ex.perHand) return false;
+  if (ex.perHand === true) return true;
+  return ex.perHand.includes(variant || (ex.variants && ex.variants[0]));
+}
+
 // Sub-label under the exercise name. Explicit `hint` wins; `perSide` is the
 // legacy shorthand for "per side".
-function exerciseHint(ex) {
-  if (ex.hint) return ex.hint;
-  // `perHand` matters for ranking: the strength standards for dumbbell lifts
-  // are quoted per dumbbell, so the number entered has to be per dumbbell too.
-  if (ex.perHand && ex.perSide) return "per side · weight per dumbbell";
-  if (ex.perHand)               return "weight per dumbbell";
-  if (ex.perSide)               return "per side";
+function exerciseHint(ex, variant) {
+  const perHand = isPerHand(ex, variant);
+  if (ex.hint) return perHand ? `${ex.hint} · weight per dumbbell` : ex.hint;
+  if (perHand && ex.perSide) return "per side · weight per dumbbell";
+  if (perHand)               return "weight per dumbbell";
+  if (ex.perSide)            return "per side";
   return null;
 }
 
@@ -618,7 +645,7 @@ function addExerciseToLog(exId, prefilledSets = null, prefilledVariant = null) {
     <div class="exercise-header">
       <div class="exercise-title">
         <div class="exercise-name">${ex.name}</div>
-        ${exerciseHint(ex) ? `<div class="exercise-hint">${exerciseHint(ex)}</div>` : ""}
+        ${exerciseHint(ex, variant) ? `<div class="exercise-hint">${exerciseHint(ex, variant)}</div>` : ""}
         ${variantSel}
       </div>
       <div style="display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap;justify-content:flex-end">
@@ -674,7 +701,8 @@ function addSet(exId, weight = "", reps = "", animate = true) {
     <td><span class="set-num">${n}</span></td>
     ${ex.weighted
       ? `<td><input class="num-input" type="number" min="0" max="9999" step="2.5"
-              value="${weight}" placeholder="lbs" aria-label="Weight, set ${n}"></td>`
+              value="${weight}" placeholder="${isPerHand(ex, document.getElementById(`variant-${exId}`)?.value) ? "lb/hand" : "lbs"}"
+              aria-label="Weight, set ${n}${isPerHand(ex, document.getElementById(`variant-${exId}`)?.value) ? ", per dumbbell" : ""}"></td>`
       : ""}
     <td><input class="num-input" type="number" min="0" max="999"
             value="${reps}" placeholder="reps" aria-label="Reps, set ${n}"></td>
