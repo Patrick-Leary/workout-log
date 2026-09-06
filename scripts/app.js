@@ -40,8 +40,16 @@ const EXERCISES = [
   // Only full ROM carries standards: Strength Level's rep figures assume it, so
   // ranking a partial against them overstates the lift.
   { id: "pushups",     name: "Push-Ups",          group: "Chest",     defaultSets: 3, repRange: null,     weighted: false, weight: 0.75, amrap: true,
+    // `lockedVariant` hides the picker and stamps every NEW set as Full ROM —
+    // the standard is now the protocol, so asking each time was pure friction.
+    // The variants list stays because it is how HISTORY is read: sets logged
+    // before 2026-09-05 carry no variant and resolve to `variants[0]`, i.e. the
+    // partial they actually were. Collapsing the list to one entry would
+    // silently re-credit them as full range and inflate the record by the
+    // measured 16% (25 reps to 90 degrees vs 21 chest-to-floor, same session).
+    lockedVariant: "Full ROM",
     variants: ["To 90\u00b0", "Full ROM"], std: { "Full ROM": "pushups" },
-    hint: "full ROM = chest within a fist of the floor" },
+    hint: "chest within a fist of the floor" },
   { id: "dips",        name: "Dips",              group: "Chest",     defaultSets: 3, repRange: null,     weighted: false, weight: 1.0, amrap: true,
     // Only the bodyweight variant carries standards; a weighted dip is a
     // different lift and Strength Level ranks it on added load, not reps.
@@ -525,6 +533,10 @@ function getLastBest(exerciseId, variant) {
 // Which variant to preselect: whatever was used last, else the first listed.
 function lastVariantFor(exId) {
   const ex = EXERCISES.find(e => e.id === exId);
+  // A locked exercise always logs as that variant, so the "last session"
+  // reference has to be that variant too — otherwise it would quote a partial-
+  // ROM number as the target to beat.
+  if (ex && ex.lockedVariant) return ex.lockedVariant;
   const fallback = ex && ex.variants ? ex.variants[0] : "";
   for (let i = 0; i < workouts.length; i++) {
     const logged = workouts[i].exercises.find(e => e.id === exId);
@@ -591,13 +603,13 @@ function addExerciseToLog(exId, prefilledSets = null, prefilledVariant = null) {
   const prevText  = best
     ? (ex.weighted ? `Last: ${best.weight ?? "–"}lb × ${best.reps}` : `Last: ${best.reps} reps`)
     : "First session";
-  const variantSel = ex.variants && ex.variants.length > 1
+  const variantSel = !ex.lockedVariant && ex.variants && ex.variants.length > 1
     ? `<select class="select-input variant-select" id="variant-${ex.id}"
                aria-label="${ex.name} variant" onchange="onVariantChange('${ex.id}')">
          ${ex.variants.map(v =>
            `<option value="${v}"${v === variant ? " selected" : ""}>${v}</option>`).join("")}
        </select>`
-    : `<input type="hidden" id="variant-${ex.id}" value="${ex.variants ? ex.variants[0] : ""}">`;
+    : `<input type="hidden" id="variant-${ex.id}" value="${ex.lockedVariant || (ex.variants ? ex.variants[0] : "")}">`;
 
   const block = document.createElement("div");
   block.className    = "exercise-block";
@@ -703,7 +715,7 @@ function collectFormData() {
       return { weight, reps };
     });
     const variant = document.getElementById(`variant-${exId}`)?.value
-                 || (ex.variants ? ex.variants[0] : "");
+                 || ex.lockedVariant || (ex.variants ? ex.variants[0] : "");
     return { id: ex.id, name: ex.name, variant, sets };
   });
 }
@@ -815,17 +827,21 @@ function baseSavedAt(kind, date) {
   return rows.length ? rows.map(n => n.savedAt).sort().pop() : undefined;
 }
 
-function sheetsGetUrl() {
-  const sep = sheetsUrl.includes("?") ? "&" : "?";
-  return sheetsSecret ? `${sheetsUrl}${sep}key=${encodeURIComponent(sheetsSecret)}` : sheetsUrl;
-}
-
 async function fetchFromSheets() {
   if (!sheetsUrl) return;
   setSyncStatus("pending", "Fetching…");
   let emptyWorkoutsGuarded = false;
   try {
-    const res  = await fetch(sheetsGetUrl());
+    // POST, not GET: a GET can only carry the secret as a query parameter,
+    // where it ends up in Google's request logs and this browser's history.
+    // text/plain keeps it a CORS "simple request" so there is no preflight —
+    // Apps Script cannot set response headers and so cannot answer one.
+    const res = await fetch(sheetsUrl, {
+      method:  "POST",
+      headers: { "Content-Type": "text/plain" },
+      body:    JSON.stringify(sheetsSecret ? { _type: "fetch", _key: sheetsSecret }
+                                           : { _type: "fetch" }),
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     if (json.status !== "ok") throw new Error(json.message || "Unknown error");

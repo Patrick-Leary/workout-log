@@ -129,6 +129,13 @@ Logged set -> Epley e1RM -> population percentile -> tier + division.
   Naming specific barbell lifts assumed a barbell program — the owner trains in a building gym
   with a Smith machine and usually no spotter, so barbell bench and back squat may never happen.
   Smith or dumbbell bench both satisfy horizontal push; leg press satisfies legs.
+- **`lockedVariant` hides the variant picker and pins new sets to one variant** (push-ups → Full
+  ROM). The variants *list* stays, because that is how history is read: sets logged before
+  2026-09-05 carry no variant and resolve to `variants[0]`, the partial they actually were.
+  ⚠️ **Do not "simplify" a locked exercise by collapsing its variants array to one entry** — that
+  silently re-credits the old partials as full range and inflates the record by the measured 16%
+  (25 reps to 90° vs 21 chest-to-floor, same session). Equipment variants (Smith/Dumbbell/Barbell)
+  are a different thing and keep their picker: they map to genuinely different standards.
 - **Deliberately unranked, do not "fix":** push-ups at `To 90°` (partial ROM against full-ROM
   standards overstates by ~16%), bodyweight split squat (Strength Level's "Bulgarian Split Squat"
   is a *barbell* lift, so no rep curve exists), captain's-chair leg raise (easier than hanging).
@@ -154,10 +161,11 @@ Absent or empty property = open endpoint (the original behaviour), so old client
 device FIRST (the server ignores the key while the property is unset), and only then add the
 property. The reverse order stops every device syncing until each one is fixed by hand.
 
-📌 **Known weakness, not fixed:** `doGet` takes the key as a **query parameter**, so it lands in
-Google's request logs and browser history. Apps Script web apps can't take custom headers without
-tripping CORS preflight, and the POST path already uses `Content-Type: text/plain` to avoid it.
-Closing this properly means moving reads to `doPost` behind a `_type: "fetch"` branch.
+**Reads go over POST** (`_type: "fetch"`), not GET, so the key rides in the body like it always
+did for writes. `doGet` still works for a manual browser check but the app no longer calls it, and
+`sheetsGetUrl()` was deleted rather than left as a trap. `buildSnapshot()` is shared by both so
+they cannot drift. Keep `Content-Type: text/plain` on every request: it keeps them CORS "simple
+requests", and Apps Script cannot set response headers so it cannot answer a preflight.
 
 ## Deploy
 Push to `main` → GitHub Pages serves it. `appsscript.js` changes additionally require the owner to

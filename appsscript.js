@@ -102,32 +102,43 @@ const DEFAULT_NUTRITION_DAYS = 120;
 
 // ── GET — fetch everything the app needs on load ──────────────────────────
 
+// The full snapshot the app loads on start. Shared by doGet and the POST
+// "fetch" branch so the two can never drift apart.
+function buildSnapshot(since) {
+  const from = since || isoDaysAgo(DEFAULT_NUTRITION_DAYS);
+
+  // Foods and Nutrition are optional and hand-edited, so a malformed tab is
+  // plausible. Isolate them: a broken Foods tab must not stop workouts and
+  // weight from syncing.
+  const warnings = [];
+  const safely = (label, fn) => {
+    try { return fn(); }
+    catch (err) { warnings.push(label + ": " + err.message); return []; }
+  };
+
+  return {
+    status:    "ok",
+    workouts:  getWorkouts(),
+    weightLog: getWeightLog(),
+    foods:     safely("Foods",     getFoods),
+    nutrition: safely("Nutrition", function () { return getNutrition(from); }),
+    warnings:  warnings,
+  };
+}
+
+/* GET is kept for manual checks from a browser tab, but the app no longer uses
+   it. ⚠️ It can only receive the secret as a QUERY PARAMETER, which lands in
+   Google's request logs, browser history and any referrer — so every routine
+   read now goes through doPost, where the key travels in the body like it
+   already did for writes. Reaching for this from code puts the secret back in
+   a URL; use the POST "fetch" branch instead.                                */
 function doGet(e) {
   try {
     const params = (e && e.parameter) || {};
     if (!authorized(params.key)) {
       return respond({ status: "error", message: "Unauthorized" });
     }
-
-    const since = params.since || isoDaysAgo(DEFAULT_NUTRITION_DAYS);
-
-    // Foods and Nutrition are optional and hand-edited, so a malformed tab is
-    // plausible. Isolate them: a broken Foods tab must not stop workouts and
-    // weight from syncing.
-    const warnings = [];
-    const safely = (label, fn) => {
-      try { return fn(); }
-      catch (err) { warnings.push(label + ": " + err.message); return []; }
-    };
-
-    return respond({
-      status:    "ok",
-      workouts:  getWorkouts(),
-      weightLog: getWeightLog(),
-      foods:     safely("Foods",     getFoods),
-      nutrition: safely("Nutrition", function () { return getNutrition(since); }),
-      warnings:  warnings,
-    });
+    return respond(buildSnapshot(params.since));
   } catch (err) {
     return respond({ status: "error", message: err.toString() });
   }
@@ -248,6 +259,11 @@ function doPost(e) {
 
     if (data._test) {
       return respond({ status: "ok", message: "Test successful" });
+    }
+
+    // Reads travel by POST so the secret stays in the body rather than a URL.
+    if (data._type === "fetch") {
+      return respond(buildSnapshot(data.since));
     }
 
     // ── Nutrition: replace the whole day, same upsert-by-date contract the
