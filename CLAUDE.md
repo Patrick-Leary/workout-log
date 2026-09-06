@@ -170,11 +170,15 @@ common "it's broken" cause, closely followed by sync settings being per-browser.
   coverage % makes that safe and turns data entry into a progress bar. Store-brand labels
   (Kirkland bar / UF milk / coconut water, CarbMaster, Oikos, GoMacro, the rice-cake chips and
   puff bar) need photographing; national brands and whole foods can be looked up.
-- **Standards missing** for the dumbbell/Smith variants of bench and squat. Those log fine and
-  show "Unranked". (Dips, dumbbell split squat, tricep pushdown, hanging leg raise and sit-ups
-  were added 2026-09-06, read off Strength Level's 130 lb row — the same reference this table
-  uses, so no interpolation was involved. ⚠️ `triceppd-cable` is the weakest of them: a cable
-  percentile depends on the machine's pulley ratio.)
+- **Standards added 2026-09-06** for dips, dumbbell split squat, tricep pushdown, hanging leg
+  raise and sit-ups — read off Strength Level's 130 lb row, the same reference this table uses,
+  so no interpolation was involved. ⚠️ `triceppd-cable` is the weakest of them: a cable
+  percentile depends on the machine's pulley ratio.
+- **Still unranked, and worth filling only when actually trained** (this line previously claimed
+  bench was missing standards — it is not, all three variants have them): weighted dips, weighted
+  pull-ups, barbell row, barbell RDL, barbell/cable curl, dumbbell squat, bodyweight squat.
+  Bodyweight squat is the only plausible near-term one. **Do not add standards speculatively** —
+  every entry is a number someone has to trust, and a wrong one is worse than "Unranked".
 - **Paste bridge**: paste the phone Project's item lines → review table → save. The "approve and
   sync" flow; matched-vs-estimated is the point of the review step.
 - **Cross-device setup** — URL and secret are typed by hand per browser. Has cost the owner time
