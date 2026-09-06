@@ -43,7 +43,9 @@ const EXERCISES = [
     variants: ["To 90\u00b0", "Full ROM"], std: { "Full ROM": "pushups" },
     hint: "full ROM = chest within a fist of the floor" },
   { id: "dips",        name: "Dips",              group: "Chest",     defaultSets: 3, repRange: null,     weighted: false, weight: 1.0, amrap: true,
-    variants: ["Bodyweight", "Weighted"], std: {} },
+    // Only the bodyweight variant carries standards; a weighted dip is a
+    // different lift and Strength Level ranks it on added load, not reps.
+    variants: ["Bodyweight", "Weighted"], std: { Bodyweight: "dips" } },
 
   // ── Back ────────────────────────────────────────────────────────────────
   { id: "pullups",     name: "Pull-Ups",          group: "Back",      defaultSets: 3, repRange: null,     weighted: false, weight: 1.0, amrap: true,
@@ -65,8 +67,15 @@ const EXERCISES = [
   { id: "rdl",         name: "Romanian Deadlift", group: "Legs",      defaultSets: 3, repRange: [8, 12],  weighted: true,  weight: 1.0, perHand: true,
     variants: ["Dumbbell", "Barbell"], std: { Dumbbell: "rdl-db" } },
   { id: "splitsquat",  name: "Split Squat",       group: "Legs",      defaultSets: 3, repRange: [8, 10],  weighted: true,  weight: 1.0, perSide: true,
-    variants: ["Dumbbell", "Bodyweight"], std: {},
-    hint: "per leg · enter 0 for bodyweight" },
+    // perHand added so the entry convention matches the standard, which is
+    // per-dumbbell like every other Strength Level dumbbell figure.
+    // ⚠️ The Bodyweight variant stays deliberately unranked: Strength Level's
+    // "Bulgarian Split Squat" is a BARBELL lift (143 lb average), not a rep
+    // count, so there is no published curve for the unloaded version. Ranking
+    // it against anything would be invention.
+    perHand: true,
+    variants: ["Dumbbell", "Bodyweight"], std: { Dumbbell: "splitsquat-db" },
+    hint: "per leg · weight per dumbbell · leave blank for bodyweight" },
 
   // ── Shoulders ───────────────────────────────────────────────────────────
   { id: "ohpress",     name: "Overhead Press",    group: "Shoulders", defaultSets: 3, repRange: [5, 10],  weighted: true,  weight: 1.0,
@@ -81,13 +90,16 @@ const EXERCISES = [
   { id: "hammercurl",  name: "Hammer Curl",       group: "Arms",      defaultSets: 3, repRange: [10, 15], weighted: true,  weight: 0.5, perHand: true,
     variants: ["Dumbbell"], std: { Dumbbell: "hammercurl-db" } },
   { id: "triceppd",    name: "Tricep Pulldown",   group: "Arms",      defaultSets: 3, repRange: [10, 15], weighted: true,  weight: 0.5,
-    variants: ["Cable"], std: {} },
+    variants: ["Cable"], std: { Cable: "triceppd-cable" } },
 
   // ── Core ────────────────────────────────────────────────────────────────
   { id: "legraise",    name: "Leg Raise",         group: "Core",      defaultSets: 3, repRange: null,     weighted: false, weight: 0.5, amrap: true,
-    variants: ["Hanging", "Captain's chair"], std: {} },
+    // Captain's chair is the easier variant (back supported, no grip limit) and
+    // has no published curve — same principle as push-up ROM: it stays unranked
+    // rather than borrowing the harder movement's standard.
+    variants: ["Hanging", "Captain's chair"], std: { Hanging: "legraise-hang" } },
   { id: "situps",      name: "Sit-Ups",           group: "Core",      defaultSets: 3, repRange: null,     weighted: false, weight: 0.5, amrap: true,
-    variants: ["Bodyweight"], std: {} },
+    variants: ["Bodyweight"], std: { Bodyweight: "situps" } },
 
   // ── Legacy ──────────────────────────────────────────────────────────────
   // No longer in the picker (the gym has no chest press machine), but kept so
@@ -135,6 +147,23 @@ const STANDARDS = {
   "seatedrow":      { kind: "weight", v: [ 72, 105, 147, 197, 250] },
   "pushups":        { kind: "reps",   v: [  3,  19,  41,  67,  96] },
   "pullups":        { kind: "reps",   v: [  1,   7,  14,  23,  33] },
+
+  // Added 2026-09-06, read off Strength Level's 130 lb row directly — the same
+  // bodyweight this table is referenced to, so no interpolation was involved.
+  //
+  // ⚠️ Strength Level prints "< 1" for the 5th-percentile anchor on hard
+  // bodyweight movements. Recorded as 0.5: the interpolation is on ln(value)
+  // and needs a positive number, and 0.5 preserves the real meaning ("most
+  // people cannot do one"). It makes the bottom band steep, which is correct —
+  // the first rep of a dip is a genuine milestone.
+  "dips":           { kind: "reps",   v: [0.5,   1,   9,  19,  30] },
+  "legraise-hang":  { kind: "reps",   v: [0.5,   7,  14,  24,  34] },
+  "situps":         { kind: "reps",   v: [0.5,  16,  44,  79, 118] },
+  "splitsquat-db":  { kind: "weight", v: [ 15,  27,  44,  65,  89] },
+  // ⚠️ WEAKER THAN THE REST. A cable pushdown percentile depends on the
+  // machine's pulley ratio, so the same effort reads differently on different
+  // stacks. Treat this rank as indicative, not comparable to the dumbbell ones.
+  "triceppd-cable": { kind: "weight", v: [ 19,  37,  61,  92, 128] },
 };
 
 // Patrick's ladder (2026-09-05). Evenly spaced percentile bands — Champion at
@@ -153,6 +182,38 @@ const TIERS = [
 // deliberate house rule for motivation, labelled as one in the UI. Training the
 // group replaces the estimate with a real measurement and restores it at once.
 const DECAY = { graceDays: 7, daysPerDivision: 5, maxTiersLost: 1 };
+
+/* ── BREADTH ──────────────────────────────────────────────────────────────
+   Caps, not deductions. Three numbers instead of one blended score:
+     earned  what the lifts say
+     cap     the ceiling your breadth allows
+     shown   the lower of the two, WITH the reason named
+   An average hides both inputs and explains nothing ("why am I Gold 3?").
+   A cap keeps effort visible even while it is binding, and states exactly what
+   unlocks the next tier — an instruction rather than a verdict.
+
+   Nothing is ever capped below Gold. At Bronze and Silver the only thing that
+   should matter is showing up, and this ladder already carries decay; a system
+   that mostly explains why you cannot rank up is one you stop opening. The
+   stated risk on this project is adherence, not accuracy.                    */
+const CAP_FLOOR_TIER = 2;                        // Gold
+
+// Movement patterns trained -> highest tier index reachable. The floor above
+// means 0-2 patterns all land on Gold; breadth only starts binding at Platinum.
+const BREADTH_CAPS = [2, 2, 2, 3, 4, 5];         // Gold Gold Gold Plat Dia Champ
+
+// An isolation-only group caps at Gold. The compound/machine/isolation weights
+// were supposed to prevent this, but they form a weighted MEAN — when every
+// lift in a group carries the same weight the weights cancel and the penalty
+// disappears entirely. Arms was sitting at Platinum 3 on two curls, which is
+// precisely what that weighting's own comment said could not happen.
+const ISOLATION_CAP_TIER = 2;                    // Gold
+
+// Sessions before a lift counts toward its group. Without this the mean
+// punishes you for TRYING: the first time you attempt a lift you are bad at it,
+// and logging it drops the group. That is backwards for a ladder whose whole
+// purpose is to reward breadth. One repeat is enough to establish a baseline.
+const GRACE_SESSIONS = 2;
 
 // Nutrition targets — from the lean-bulk plan. 2,650 is the target and 2,500
 // the floor; protein has a band rather than a single number.
@@ -199,7 +260,36 @@ const NUTRIENTS = [
   { key: "folate", label: "Folate",        unit: "mcg", dv: 400,  src: "usda",  goal: "hit"  },
   { key: "mg",     label: "Magnesium",     unit: "mg",  dv: 420,  src: "usda",  goal: "hit"  },
   { key: "zn",     label: "Zinc",          unit: "mg",  dv: 11,   src: "usda",  goal: "hit"  },
+  // Alcohol is recorded, not scored daily. A per-day cap is the wrong frame —
+  // the meaningful unit is standard drinks per WEEK, so it is rolled up in the
+  // weekly readout instead of painted red at dinner. Stored in grams of
+  // ethanol; STD_DRINK_G converts for display.
+  // notMicro: tracked and totalled, but excluded from the micronutrient block —
+  // it is neither a macro to hit nor a nutrient to cover, and counting it there
+  // inflated the readout to "17 of 18 micronutrients barely covered".
+  { key: "alc",    label: "Alcohol",       unit: "g",   dv: 0,    src: "label", goal: null, notMicro: true },
 ];
+
+// One US standard drink = 14 g of pure ethanol (0.6 fl oz). 10 g in the UK and
+// Australia — this constant is the only thing that would need changing.
+const STD_DRINK_G = 14;
+// Ethanol yields ~7 kcal/g. Used to split a day's calories into the part that
+// can build tissue and the part that cannot.
+const KCAL_PER_G_ALCOHOL = 7;
+
+// The number that actually answers "did I eat enough today". Alcohol calories
+// do not support tissue synthesis, so on a drinking day the headline total
+// flatters the day badly — 9/05/2026 read 2,665 against a 2,650 target while
+// supplying only 2,383 calories of food. Carbohydrate from beer and mixers IS
+// food energy and stays counted; only the ethanol is removed.
+function foodCalories(items) {
+  return items.reduce((s, it) =>
+    s + (Number(it.cal) || 0) - (Number(it.alc) || 0) * KCAL_PER_G_ALCOHOL, 0);
+}
+
+function standardDrinks(items) {
+  return items.reduce((s, it) => s + (Number(it.alc) || 0), 0) / STD_DRINK_G;
+}
 
 // Every numeric nutrient column, in sheet order.
 const FOOD_MACROS = NUTRIENTS.map(n => n.key);
@@ -243,6 +333,7 @@ let nutrition      = [];   // logged food items across all loaded dates
 let foodQueue      = [];   // food days awaiting sync (kept apart from syncQueue)
 let sheetsSecret   = "";
 let currentFoodDate = "";
+let openGroup       = null;   // Progress: which group tile is drilled into
 let foodQuery      = "";
 let foodDirty      = [];   // dates with local edits not yet accepted by Sheets
 let lastFoodResults = [];  // what the picker is currently showing
@@ -379,17 +470,23 @@ function updateThemeIcon(btn, theme) {
 
 // ── TABS ──────────────────────────────────────────────────────────────────
 
-const TAB_IDS = ["log", "weight", "food", "history", "progress", "settings"];
+// Four tabs, split by what you are DOING rather than by data type. "Today" is
+// everything you enter (workout, then body weight); "Progress" is everything
+// you look back at (ranks, weight trend, past workouts). Food keeps its own tab
+// — its search, picker and totals are too large to fold into Today without
+// hurting both. The workout form stays the first thing on Today: that is the
+// gym use case and it must stay one tap from launch.
+const TAB_IDS = ["log", "food", "progress", "settings"];
 
 function switchTab(name) {
   TAB_IDS.forEach(id => {
     document.getElementById(`tab-${id}`)?.classList.toggle("active", id === name);
     document.getElementById(`panel-${id}`)?.classList.toggle("active", id === name);
   });
-  if (name === "history")  renderHistory();
-  if (name === "progress") renderProgress();
+  // Progress absorbed History and the weight log, so opening it renders all
+  // three. Today keeps the weight ENTRY field only — see index.html.
+  if (name === "progress") { renderProgress(); renderHistory(); renderWeightTab(); }
   if (name === "settings") renderSettings();
-  if (name === "weight")   renderWeightTab();
   if (name === "food")     renderFoodTab();
 }
 
@@ -695,8 +792,27 @@ async function postToSheets(payload) {
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = await res.json();
+
+  // A conflict is not a failure to retry — retrying would overwrite the other
+  // device. Pull the newer version down and tell the user, so they can see what
+  // changed before deciding. Silently winning is the outcome worth avoiding.
+  if (json.status === "conflict") {
+    showToast(`${json.message || "Changed elsewhere"} — pulling the newer version`, "error");
+    await fetchFromSheets();
+    const err = new Error(json.message || "Conflict");
+    err.conflict = true;
+    throw err;
+  }
   if (json.status !== "ok") throw new Error(json.message || "Unknown error");
   return json;
+}
+
+// What this device last READ for a date — the base a write is made against.
+// Undefined means "never synced this date", which the server treats as safe.
+function baseSavedAt(kind, date) {
+  if (kind === "workout") return workouts.find(w => w.date === date)?.savedAt;
+  const rows = nutrition.filter(n => n.date === date && n.savedAt);
+  return rows.length ? rows.map(n => n.savedAt).sort().pop() : undefined;
 }
 
 function sheetsGetUrl() {
@@ -707,13 +823,24 @@ function sheetsGetUrl() {
 async function fetchFromSheets() {
   if (!sheetsUrl) return;
   setSyncStatus("pending", "Fetching…");
+  let emptyWorkoutsGuarded = false;
   try {
     const res  = await fetch(sheetsGetUrl());
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     if (json.status !== "ok") throw new Error(json.message || "Unknown error");
 
-    workouts = json.workouts;
+    // Every other collection below is guarded; this one was not, and it is the
+    // only one whose loss is unrecoverable. An empty, renamed or mid-edit
+    // Workouts tab would replace all local history with [] and then persist the
+    // wipe. Refuse to trade real local data for an empty remote one.
+    if (Array.isArray(json.workouts)) {
+      if (json.workouts.length || !workouts.length) {
+        workouts = json.workouts;
+      } else {
+        emptyWorkoutsGuarded = true;
+      }
+    }
     if (Array.isArray(json.weightLog)) weightLog = json.weightLog;
     if (Array.isArray(json.foods))     foods     = json.foods;
     // Sheet rows carry no id, but the quantity and remove controls address
@@ -729,13 +856,13 @@ async function fetchFromSheets() {
       nutrition = [...fromSheet, ...keptLocal];
     }
     persist();
-    setSyncStatus("ok", "Synced");
+    setSyncStatus(...(emptyWorkoutsGuarded
+      ? ["error", "Sheet returned no workouts — kept local history"]
+      : ["ok", "Synced"]));
 
     // Refresh whichever data tab is currently visible
     const activePanel = document.querySelector(".tab-panel.active")?.id;
-    if (activePanel === "panel-history")  renderHistory();
-    if (activePanel === "panel-progress") renderProgress();
-    if (activePanel === "panel-weight")   renderWeightTab();
+    if (activePanel === "panel-progress") { renderProgress(); renderHistory(); renderWeightTab(); }
     if (activePanel === "panel-food")     renderFoodTab();
 
   } catch (err) {
@@ -767,7 +894,7 @@ async function syncToSheets(entry) {
 
   setSyncStatus("pending", "Syncing…");
   try {
-    await postToSheets(entry);
+    await postToSheets({ ...entry, _base: baseSavedAt("workout", entry.date) });
 
     setSyncStatus("ok", "Synced");
     syncQueue = syncQueue.filter(q => q.date !== entry.date);
@@ -1215,6 +1342,11 @@ function currentBodyweight() {
 function epley(weight, reps) {
   const w = Number(weight), r = Number(reps);
   if (!Number.isFinite(w) || !Number.isFinite(r) || r < 1) return null;
+  // A single rep IS the one-rep max — no estimation involved. Plain Epley
+  // returns w * 31/30 at r=1, inflating a genuine 1RM by 3.3% and quietly
+  // making the most accurate input the app can receive one of its least
+  // accurate outputs.
+  if (r === 1) return w;
   return w * (1 + r / 30);
 }
 
@@ -1311,6 +1443,7 @@ function bestSetsByVariant(exId) {
   const ex = EXERCISES.find(e => e.id === exId);
   if (!ex) return null;
   const byVariant = {};
+  const sessions  = {};                 // variant -> distinct sessions logged
   let lastDate = null, lastVariant = null;
 
   workouts.forEach(w => {
@@ -1320,6 +1453,7 @@ function bestSetsByVariant(exId) {
     if (!done.length) return;
 
     const variant = logged.variant || (ex.variants && ex.variants[0]) || "";
+    sessions[variant] = (sessions[variant] || 0) + 1;
     if (!lastDate || w.date > lastDate) { lastDate = w.date; lastVariant = variant; }
 
     done.forEach(s => {
@@ -1333,7 +1467,7 @@ function bestSetsByVariant(exId) {
     });
   });
 
-  return lastDate ? { byVariant, lastDate, lastVariant } : null;
+  return lastDate ? { byVariant, sessions, lastDate, lastVariant } : null;
 }
 
 // Full rank for one exercise, peak preserved separately from the decayed value.
@@ -1343,10 +1477,11 @@ function rankForExercise(exId) {
   const found = bestSetsByVariant(exId);
   if (!found) return null;
 
-  const { byVariant, lastDate, lastVariant } = found;
+  const { byVariant, sessions, lastDate, lastVariant } = found;
   const daysSince = daysBetween(lastDate, todayISO());
   const base = { id: exId, name: ex.name, group: ex.group, weight: ex.weight,
-                 lastDate, daysSince, variant: lastVariant };
+                 lastDate, daysSince, variant: lastVariant,
+                 sessions: sessions[lastVariant] || 0 };
 
   // Rank the variant actually being trained now, not the flattering one.
   const best = byVariant[lastVariant];
@@ -1393,36 +1528,83 @@ function allRanks() {
   return EXERCISES.map(ex => rankForExercise(ex.id)).filter(Boolean);
 }
 
-// Group score: weighted mean of rungs (compound 1.0 / machine 0.75 /
-// isolation 0.5), so Arms can't ride to Gold on curls alone.
-function groupRank(group) {
-  const rs = allRanks().filter(r => r.group === group && r.ranked);
-  if (!rs.length) return null;
-  const wsum = rs.reduce((s, r) => s + r.weight, 0);
-  const rung = rs.reduce((s, r) => s + r.rung * r.weight, 0) / wsum;
-  const days = Math.min(...rs.map(r => r.daysSince ?? 9999));
-  return { group, ...rungToTier(rung), count: rs.length, daysSince: days,
-           isolationOnly: rs.every(r => r.weight <= 0.5),
-           thin: rs.length === 1,
-           decayed: rs.some(r => r.lost > 0) };
+// Apply a tier ceiling to a rung. Never drops below CAP_FLOOR_TIER, and always
+// reports what was earned so the display can show both.
+function applyCap(rung, capTierIndex, reason) {
+  const ceiling = Math.max(capTierIndex, CAP_FLOOR_TIER) + 0.999;
+  if (rung <= ceiling) return { rung, capped: false, earnedRung: rung };
+  return { rung: ceiling, capped: true, reason, earnedRung: rung };
 }
 
-// Headline: one slot per movement pattern, each filled by its best-ranked
-// exercise. Unfilled slots count as rung 0 rather than being skipped — that is
-// what keeps "Bronze" honest for someone with three patterns untrained, instead
-// of letting one strong lift carry the whole score.
-function overallRank() {
+// Breadth across the five movement patterns. This is the headline, and it is
+// deliberately a CHECKLIST rather than a score: "4/5 · vertical pull untrained
+// · unlocks Champion" tells you what to do, where "Bronze 2" only told you how
+// you were doing. Same underlying slot logic the old overall rank used.
+function trainingBreadth() {
   const ranks = allRanks();
   const slots = HEADLINE_PATTERNS.map(p => {
     const candidates = ranks.filter(r => p.ids.includes(r.id) && r.ranked);
-    if (!candidates.length) return { pattern: p.name, rung: 0, filled: false };
+    if (!candidates.length) return { pattern: p.name, filled: false };
     const best = candidates.reduce((a, b) => (b.rung > a.rung ? b : a));
-    return { pattern: p.name, rung: best.rung, filled: true,
-             via: best.name, tier: best.tier, division: best.division };
+    return { pattern: p.name, filled: true, via: best.name,
+             tier: best.tier, division: best.division };
   });
-  const rung    = slots.reduce((s, x) => s + x.rung, 0) / slots.length;
-  const missing = slots.filter(s => !s.filled).map(s => s.pattern);
-  return { ...rungToTier(rung), slots, missing, count: slots.length - missing.length };
+  const trained  = slots.filter(s => s.filled).length;
+  const capIndex = BREADTH_CAPS[trained];
+  const next     = trained < HEADLINE_PATTERNS.length ? BREADTH_CAPS[trained + 1] : null;
+  return {
+    slots, trained, total: HEADLINE_PATTERNS.length, capIndex,
+    capTier:   TIERS[capIndex].name,
+    untrained: slots.filter(s => !s.filled).map(s => s.pattern),
+    // Only worth showing when training one more pattern actually raises the
+    // ceiling — at 0-2 patterns it does not, and saying so would be noise.
+    unlocks:   next != null && next > capIndex ? TIERS[next].name : null,
+  };
+}
+
+// Group score: weighted mean of rungs (compound 1.0 / machine 0.75 /
+// isolation 0.5), then capped. See BREADTH above for why caps rather than a
+// blended average, and why the weights alone were not enough.
+function groupRank(group) {
+  const all = allRanks().filter(r => r.group === group && r.ranked);
+  if (!all.length) return null;
+
+  // New-lift grace. A lift below GRACE_SESSIONS still gets its own card; it
+  // just does not drag the group while you are learning it. If nothing in the
+  // group is established yet the whole group is provisional rather than empty —
+  // hiding it would be worse than showing it with a caveat.
+  const established = all.filter(r => (r.sessions || 0) >= GRACE_SESSIONS);
+  const rs          = established.length ? established : all;
+  const provisional = !established.length;
+
+  const wsum   = rs.reduce((s, r) => s + r.weight, 0);
+  const earned = rs.reduce((s, r) => s + r.rung * r.weight, 0) / wsum;
+  const days   = Math.min(...rs.map(r => r.daysSince ?? 9999));
+
+  const isolationOnly = rs.every(r => r.weight <= 0.5);
+  const breadth       = trainingBreadth();
+
+  // Lowest ceiling wins, and the reason travels with it.
+  const caps = [{ index: breadth.capIndex,
+                  reason: `${breadth.trained}/${breadth.total} movement patterns` }];
+  if (isolationOnly) caps.push({ index: ISOLATION_CAP_TIER, reason: "isolation lifts only" });
+  // When two ceilings tie, both are true and both are actionable — naming only
+  // whichever happened to be first in the array would send you to fix one
+  // constraint and leave the other still holding you at the same tier.
+  const lowest   = Math.min(...caps.map(c => c.index));
+  const reason   = caps.filter(c => c.index === lowest).map(c => c.reason).join(" + ");
+  const capped   = applyCap(earned, lowest, reason);
+
+  return { group, ...rungToTier(capped.rung), count: rs.length, daysSince: days,
+           isolationOnly, thin: rs.length === 1, provisional,
+           pending: all.length - rs.length,
+           decayed: rs.some(r => r.lost > 0),
+           // Carried up from the cards: a tile reading "Platinum 3" off a
+           // 20-rep Epley estimate is the least trustworthy number on the page
+           // and must not look like the most confident one.
+           lowConfidence: rs.some(r => r.confidence && r.confidence !== "high"),
+           capped: capped.capped, capReason: capped.reason,
+           earned: rungToTier(capped.earnedRung) };
 }
 
 // ── PROGRESS ──────────────────────────────────────────────────────────────
@@ -1470,9 +1652,16 @@ function e1rmSeries(exId, variant) {
     .slice()
     .sort((a, b) => a.date.localeCompare(b.date))
     .map(w => {
-      const logged = w.exercises.find(e =>
-        e.id === exId && (!variant || !e.variant || e.variant === variant));
+      const logged = w.exercises.find(e => e.id === exId);
       if (!logged) return null;
+      // Unlabelled history resolves to the DEFAULT variant, exactly as
+      // bestSetsByVariant does. Previously an unlabelled set matched EVERY
+      // variant, so the Full ROM chart silently absorbed partial-ROM history:
+      // 9/04/2026's 25 partial reps became the "previous" value for a 21-rep
+      // full-ROM set and the card reported a 4-rep regression that never
+      // happened — the exact inflation variants exist to prevent.
+      const v = logged.variant || (ex.variants && ex.variants[0]) || "";
+      if (variant && v !== variant) return null;
       const vals = logged.sets.map(s => setValue(ex, s)).filter(v => v != null);
       return vals.length ? { date: w.date, value: Math.max(...vals) } : null;
     })
@@ -1526,9 +1715,13 @@ function renderProgress() {
 
   if (rankArea) rankArea.innerHTML = renderRanks();
 
-  // ── Per-exercise cards ─────────────────────────────────────────────────
+  // ── Per-exercise cards, filtered to the open group ─────────────────────
+  // A flat grid of every exercise only gets longer. Tapping a tile opens that
+  // group; nothing open shows nothing, which keeps the tiles as the page.
   const ranks = allRanks();
-  EXERCISES.forEach(ex => {
+  if (!openGroup) return;
+
+  EXERCISES.filter(ex => ex.group === openGroup).forEach(ex => {
     const r = ranks.find(x => x.id === ex.id);
     if (!r) return;   // never logged
 
@@ -1591,48 +1784,59 @@ function renderProgress() {
   });
 }
 
-// Overall + per-group tiles. The headline uses only the big five, which is what
-// makes "Bronze" honest for someone who has never benched, squatted or pulled
-// down — the isolation lifts get their own tiles and can't inflate it.
+// Breadth checklist + per-group tiles. The old overall RANK is gone: a single
+// blended number could not say what to do about itself. What it uniquely
+// carried — that untrained patterns count against you — survives as the cap,
+// which is stated rather than baked into an average.
 function renderRanks() {
-  const o = overallRank();
+  const b = trainingBreadth();
 
   const tiles = GROUPS.map(g => {
     const gr = groupRank(g);
     if (!gr) return `
-      <div class="rank-tile rank-tile-empty">
+      <button type="button" class="rank-tile rank-tile-empty" disabled>
         <span class="rt-group">${esc(g)}</span>
         <span class="rt-tier">—</span>
         <span class="rt-note">not logged</span>
-      </div>`;
+      </button>`;
     const stale = gr.daysSince > DECAY.graceDays;
+    const open  = openGroup === g;
+    const notes = [
+      gr.thin ? "1 lift" : `${gr.count} lifts`,
+      gr.pending  ? `${gr.pending} establishing` : "",
+      gr.isolationOnly ? "isolation only" : "",
+      stale ? `${gr.daysSince}d` : "",
+    ].filter(Boolean).join(" · ");
     return `
-      <div class="rank-tile ${tierClass(gr.tier)}">
-        <span class="rt-group">${esc(g)}</span>
-        <span class="rt-tier">${gr.tier} ${gr.division}</span>
-        <span class="rt-note">
-          ${gr.thin ? "1 lift" : `${gr.count} lifts`}${gr.isolationOnly ? " · isolation only" : ""}
-          ${stale ? `<span class="rt-stale">· ${gr.daysSince}d</span>` : ""}
+      <button type="button" class="rank-tile ${tierClass(gr.tier)}${open ? " rank-tile-open" : ""}"
+              aria-expanded="${open}" onclick="toggleGroup('${esc(g)}')">
+        <span class="rt-group">${esc(g)}
+          ${gr.lowConfidence ? `<span class="rt-flag" title="Includes a rank estimated from a high-rep set — 1RM formulas spread badly above ~12 reps">~</span>` : ""}
         </span>
-      </div>`;
+        <span class="rt-tier">${gr.tier} ${gr.division}</span>
+        ${gr.capped ? `<span class="rt-cap" title="Earned ${gr.earned.tier} ${gr.earned.division} — held at ${gr.tier} by ${esc(gr.capReason)}">▲ ${gr.earned.tier} earned · capped</span>` : ""}
+        <span class="rt-note">${esc(notes)}${gr.provisional ? ` · <span class="rt-prov">provisional</span>` : ""}</span>
+      </button>`;
   }).join("");
 
   return `
     <div class="rank-block">
-      <div class="rank-overall ${tierClass(o.tier)}">
-        <div class="ro-left">
-          <span class="ro-label">Overall</span>
-          <span class="ro-tier">${o.tier} ${o.division}</span>
+      <div class="breadth-head">
+        <div class="bh-left">
+          <span class="bh-count">${b.trained}<span class="bh-of">/${b.total}</span></span>
+          <span class="bh-label">movement patterns trained</span>
         </div>
-        <div class="ro-right">
-          <span class="ro-basis">${o.count}/5 movement patterns trained</span>
-          ${o.missing.length
-            ? `<span class="ro-missing">nothing logged for: ${esc(o.missing.join(", "))}</span>`
-            : `<span class="ro-basis">all five patterns covered</span>`}
+        <div class="bh-right">
+          ${b.untrained.length
+            ? `<span class="bh-todo">Not yet trained: <strong>${esc(b.untrained.join(", "))}</strong></span>`
+            : `<span class="bh-done">All five patterns covered</span>`}
+          ${b.unlocks
+            ? `<span class="bh-unlock">One more pattern unlocks <strong>${esc(b.unlocks)}</strong></span>`
+            : `<span class="bh-unlock">Ceiling: <strong>${esc(b.capTier)}</strong></span>`}
         </div>
       </div>
       <div class="pattern-row">
-        ${o.slots.map(s => `
+        ${b.slots.map(s => `
           <div class="pattern-slot${s.filled ? " " + tierClass(s.tier) : " pattern-empty"}">
             <span class="ps-name">${esc(s.pattern)}</span>
             <span class="ps-tier">${s.filled ? `${s.tier} ${s.division}` : "—"}</span>
@@ -1640,16 +1844,22 @@ function renderRanks() {
           </div>`).join("")}
       </div>
       <div class="rank-tiles">${tiles}</div>
+      ${openGroup ? `<div class="group-open-label">${esc(openGroup)} — tap the tile again to close</div>` : ""}
       <p class="rank-note">
-        The headline is one slot per movement pattern, each filled by whatever you actually
-        train for it — Smith or dumbbell bench both count as horizontal push, leg press counts
-        as legs. Percentiles are against <strong>people who log lifts on Strength Level</strong> —
-        a committed population, well above average. Thresholds scale with bodyweight,
-        so this measures strength <em>per pound</em>. Untrained groups slip after
-        ${DECAY.graceDays} days as an upkeep rule, not a claim that you got weaker —
-        training one restores it immediately.
+        Percentiles are against <strong>people who log lifts on Strength Level</strong> — a
+        committed population, well above average. Thresholds scale with bodyweight, so this
+        measures strength <em>per pound</em>. Untrained groups slip after ${DECAY.graceDays}
+        days as an upkeep rule, not a claim that you got weaker. A tier ceiling from breadth
+        or from isolation-only training never drops below <strong>${TIERS[CAP_FLOOR_TIER].name}</strong>
+        — early on, showing up is the whole job.
       </p>
     </div>`;
+}
+
+// Tapping the open group closes it, so the tiles can be the whole page again.
+function toggleGroup(g) {
+  openGroup = openGroup === g ? null : g;
+  renderProgress();
 }
 
 // ── FOOD ──────────────────────────────────────────────────────────────────
@@ -1912,7 +2122,7 @@ async function syncFoodToSheets(entry) {
   if (!sheetsUrl) return;
   setSyncStatus("pending", "Syncing…");
   try {
-    await postToSheets(entry);
+    await postToSheets({ ...entry, _base: baseSavedAt("food", entry.date) });
     setSyncStatus("ok", "Synced");
     foodQueue = foodQueue.filter(q => q.date !== entry.date);
     foodDirty = foodDirty.filter(d => d !== entry.date);  // Sheets has it now
@@ -2148,6 +2358,21 @@ function renderFoodTab() {
   renderFoodItems();
 }
 
+// Standard drinks over the 7 days ending on `date`. Alcohol is meaningless as a
+// daily number and meaningful as a weekly one: the common clinical threshold for
+// men is 14/week, and a single heavy night reads very differently depending on
+// what the rest of the week looked like.
+function weekDrinks(date) {
+  const end = new Date(date + "T00:00:00");
+  const start = new Date(end); start.setDate(start.getDate() - 6);
+  const iso = d => d.toISOString().slice(0, 10);
+  let g = 0;
+  nutrition.forEach(n => {
+    if (n.date >= iso(start) && n.date <= date) g += Number(n.alc) || 0;
+  });
+  return g / STD_DRINK_G;
+}
+
 function renderFoodTotals() {
   const el = document.getElementById("food-totals");
   if (!el) return;
@@ -2156,10 +2381,16 @@ function renderFoodTotals() {
   const t       = foodTotals(items);
   const isToday = currentFoodDate === todayISO();
 
-  const rem      = FOOD_TARGETS.cal - t.cal;
-  const pct      = Math.min(100, (t.cal / FOOD_TARGETS.cal) * 100);
+  // Judge the day on FOOD calories. On a dry day these are identical, so
+  // nothing changes; on a drinking day the raw total flatters the day badly and
+  // has already hidden one miss (9/05/2026 read 2,665 against a 2,650 target on
+  // 2,384 calories of food).
+  const fcal     = foodCalories(items);
+  const drinks   = standardDrinks(items);
+  const rem      = FOOD_TARGETS.cal - fcal;
+  const pct      = Math.min(100, (fcal / FOOD_TARGETS.cal) * 100);
   const floorPct = (FOOD_TARGETS.calFloor / FOOD_TARGETS.cal) * 100;
-  const calState = paceState(t.cal, FOOD_TARGETS.cal, isToday);
+  const calState = paceState(fcal, FOOD_TARGETS.cal, isToday);
 
   const proteinState = t.p >= FOOD_TARGETS.proteinMin ? "ok"
                      : paceState(t.p, FOOD_TARGETS.proteinMin, isToday);
@@ -2180,9 +2411,11 @@ function renderFoodTotals() {
     <div class="food-totals">
       <div class="food-total-main">
         <div class="food-total-block">
-          <span class="ft-num ft-${calState}">${fmtNum(t.cal)}</span>
-          <span class="ft-unit">cal</span>
-          <span class="ft-sub">${remLabel} · target ${fmtNum(FOOD_TARGETS.cal)}</span>
+          <span class="ft-num ft-${calState}">${fmtNum(fcal)}</span>
+          <span class="ft-unit">cal${drinks > 0 ? " of food" : ""}</span>
+          <span class="ft-sub">${remLabel} · ${drinks > 0
+            ? `${fmtNum(t.cal)} with alcohol`
+            : `target ${fmtNum(FOOD_TARGETS.cal)}`}</span>
         </div>
         <div class="food-total-block">
           <span class="ft-num ft-${proteinState}">${fmtNum(t.p)}</span>
@@ -2204,6 +2437,14 @@ function renderFoodTotals() {
         <span class="na-val na-${naState}">${fmtNum(t.na)}<span class="na-target"> / ${fmtNum(naTarget)}mg</span></span>
       </div>
 
+      ${drinks > 0 ? `
+      <div class="food-drinks-row">
+        <span class="na-label">Alcohol</span>
+        <span class="drinks-val">${drinks.toFixed(1)} std drink${drinks >= 1.95 ? "s" : ""}</span>
+        <span class="drinks-sub">${fmtNum(t.alc)}g ethanol · ${fmtNum(t.alc * KCAL_PER_G_ALCOHOL)} cal
+          · ${weekDrinks(currentFoodDate).toFixed(1)} in the last 7 days</span>
+      </div>` : ""}
+
       ${unsaved}
 
       <div class="food-macro-row">
@@ -2220,7 +2461,7 @@ function renderFoodTotals() {
 // Track everything, display by exception. Only nutrients that are actually off
 // target surface; the rest stay folded away so the tab stays readable.
 function renderMicroSummary(items, t, isToday) {
-  const micros = NUTRIENTS.filter(n => !n.core);
+  const micros = NUTRIENTS.filter(n => !n.core && !n.notMicro);
   if (!micros.length) return "";
 
   // Same clock rule as calories and protein. Judging a micronutrient against

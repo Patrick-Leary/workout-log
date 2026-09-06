@@ -34,7 +34,12 @@ var NUTRIENT_COLS = [
   ["Sugar", "sugar"], ["AddSug", "addsug"], ["VitD", "vitd"], ["Ca", "ca"],
   ["Fe", "fe"], ["Potassium", "k"], ["VitA", "vita"], ["VitC", "vitc"],
   ["VitE", "vite"], ["VitK", "vitk"], ["B6", "b6"], ["B12", "b12"],
-  ["Folate", "folate"], ["Mg", "mg"], ["Zn", "zn"]
+  ["Folate", "folate"], ["Mg", "mg"], ["Zn", "zn"],
+  // Grams of pure ethanol per serving. Stored as grams rather than "standard
+  // drinks" because grams is the physical quantity and the drink unit is a
+  // local convention (14g US, 10g UK/AU) — convert at display time, the same
+  // way weights are stored in lbs and ranked against whatever standard applies.
+  ["Alc", "alc"]
 ];
 
 function nutrientHeaders() {
@@ -50,14 +55,44 @@ var NUTRITION_HEADERS = ["Date", "Meal", "Key", "Item", "Qty"]
 var WORKOUT_HEADERS = ["Date", "Exercise", "Set", "Weight (lbs)", "Reps", "Saved At", "Variant"];
 
 // ── AUTH ──────────────────────────────────────────────────────────────────
-// Leave blank to keep the endpoint open (the original behaviour). Set it to a
-// long random string and enter the same value in the app's Settings tab to
-// require it. Deploy with it blank first, confirm the app still works, THEN
-// set it — otherwise every device stops syncing until Settings is updated.
-const SECRET = "";
+/* The shared secret lives in SCRIPT PROPERTIES, never in this file.
+   ⚠️ This repo is PUBLIC. The previous design was `const SECRET = "..."` right
+   here, which would have published the secret to GitHub the first time it was
+   committed — a hardcoded secret in a tracked file is worse than no secret at
+   all, because it looks like protection while offering none.
+
+   To set it:  Apps Script editor → Project Settings → Script Properties →
+               add `SHARED_SECRET` = a long random string.
+   To rotate:  change the property, then update Settings on each device.
+   To disable: delete the property. Absent or empty = open endpoint, which is
+               the original behaviour and keeps old clients working.
+
+   ⚠️ ROLLOUT ORDER MATTERS. App settings are per-browser, so enter the secret
+   in Settings on EVERY device FIRST — while the property is still unset the
+   server ignores the key it is being sent — and only then add the property.
+   Doing it the other way round stops every device syncing until you have
+   walked round and fixed each one.                                          */
+function sharedSecret() {
+  try {
+    return PropertiesService.getScriptProperties().getProperty("SHARED_SECRET") || "";
+  } catch (err) {
+    // A properties failure must not lock the owner out of their own data.
+    return "";
+  }
+}
 
 function authorized(key) {
-  return !SECRET || String(key || "") === SECRET;
+  const secret = sharedSecret();
+  if (!secret) return true;
+  // Length-independent comparison. Not a meaningful timing defence over HTTPS
+  // against a remote attacker, but it costs nothing and avoids the habit.
+  const given = String(key || "");
+  if (given.length !== secret.length) return false;
+  let diff = 0;
+  for (let i = 0; i < secret.length; i++) {
+    diff |= given.charCodeAt(i) ^ secret.charCodeAt(i);
+  }
+  return diff === 0;
 }
 
 // How many days of nutrition rows doGet returns when the caller doesn't ask
@@ -219,6 +254,11 @@ function doPost(e) {
     //    workout path uses. Re-saving a date is always safe.
     if (data._type === "food") {
       const sheet = ensureSheet("Nutrition", NUTRITION_HEADERS);
+      const conflict = staleWrite(sheet, data.date, data._base);
+      if (conflict) {
+        return respond({ status: "conflict", date: data.date, serverSavedAt: conflict,
+                         message: "This day was changed on another device" });
+      }
       deleteRowsForDate(sheet, data.date);
 
       const savedAt = data.savedAt || new Date().toISOString();
@@ -236,6 +276,55 @@ function doPost(e) {
         sheet.appendRow(buildRow(sheet, values));
       });
       return respond({ status: "ok" });
+    }
+
+    // ── Foods: upsert by Key. Deliberately NOT the replace-the-whole-tab
+    //    contract the other writers use. Foods is the hand-curated source of
+    //    truth for every repeat item, so a truncated or malformed payload must
+    //    never be able to empty it. Unknown keys append; known keys update in
+    //    place. A field the payload omits leaves the existing cell alone, so a
+    //    partial update (say, only the micronutrients) is safe to send.
+    if (data._type === "foods") {
+      const sheet = ensureSheet("Foods", FOODS_HEADERS);
+      const lastCol = sheet.getLastColumn();
+      const header  = sheet.getRange(1, 1, 1, lastCol).getValues()[0]
+                        .map(function (h) { return String(h || "").trim(); });
+      const keyCol  = header.indexOf("Key");
+      if (keyCol < 0) return respond({ status: "error", message: "Foods tab has no Key column" });
+
+      const lastRow = sheet.getLastRow();
+      const existing = {};
+      if (lastRow > 1) {
+        sheet.getRange(2, 1, lastRow - 1, lastCol).getValues().forEach(function (r, n) {
+          const k = String(r[keyCol] || "").trim();
+          if (k) existing[k] = { row: n + 2, values: r };
+        });
+      }
+
+      let added = 0, updated = 0;
+      (data.foods || []).forEach(function (f) {
+        const key = String(f.key || "").trim();
+        if (!key) return;
+
+        // Map the payload's field names onto this sheet's actual columns.
+        const patch = { "Key": key, "Name": f.name, "Brand": f.brand,
+                        "Serving": f.serving, "Verified": f.verified, "MicroSrc": f.microSrc };
+        NUTRIENT_COLS.forEach(function (c) { patch[c[0]] = f[c[1]]; });
+
+        const hit = existing[key];
+        if (hit) {
+          const merged = header.map(function (h, n) {
+            const v = patch[h];
+            return v === undefined || v === null ? hit.values[n] : v;
+          });
+          sheet.getRange(hit.row, 1, 1, lastCol).setValues([merged]);
+          updated++;
+        } else {
+          sheet.appendRow(buildRow(sheet, patch));
+          added++;
+        }
+      });
+      return respond({ status: "ok", added: added, updated: updated });
     }
 
     if (data._deleteNutrition) {
@@ -273,6 +362,12 @@ function doPost(e) {
     if (data._delete) {
       deleteRowsForDate(sheet, data.date);
       return respond({ status: "ok" });
+    }
+
+    const wConflict = staleWrite(sheet, data.date, data._base);
+    if (wConflict) {
+      return respond({ status: "conflict", date: data.date, serverSavedAt: wConflict,
+                       message: "This workout was changed on another device" });
     }
 
     // Delete all existing rows for this date so we don't accumulate duplicates
@@ -396,6 +491,39 @@ function ensureSheet(name, headers) {
 
 // Remove every row whose column A matches `date`. Walks backwards so the
 // shifting row indexes don't skip matches.
+// The newest "Saved At" already stored for a date, or "" if the date is absent.
+// This is the whole concurrency mechanism: there is no locking in Sheets, so a
+// phone and a laptop editing the same day would both delete-and-append and the
+// slower one would win silently, taking the other's work with it.
+function latestSavedAtForDate(sheet, date) {
+  if (!sheet) return "";
+  const lastRow = sheet.getLastRow(), lastCol = sheet.getLastColumn();
+  if (lastRow <= 1 || lastCol < 1) return "";
+  const header = sheet.getRange(1, 1, 1, lastCol).getValues()[0]
+                   .map(function (h) { return String(h || "").trim(); });
+  const dCol = header.indexOf("Date"), sCol = header.indexOf("Saved At");
+  if (dCol < 0 || sCol < 0) return "";
+  const rows = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  let newest = "";
+  rows.forEach(function (r) {
+    if (formatDateCell(r[dCol]) !== String(date)) return;
+    const v = String(r[sCol] || "");
+    if (v > newest) newest = v;
+  });
+  return newest;
+}
+
+// A write is refused when the sheet holds a version the client never saw.
+// `_base` is what the client last READ for this date; if the sheet has moved on
+// since, the client is about to overwrite someone else's save. Clients that
+// send no `_base` are trusted, so older app versions keep working.
+function staleWrite(sheet, date, base) {
+  if (base === undefined || base === null) return null;
+  const current = latestSavedAtForDate(sheet, date);
+  if (!current || current === String(base)) return null;
+  return current;
+}
+
 function deleteRowsForDate(sheet, date) {
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) return;

@@ -72,7 +72,13 @@ have label-verified macros beside looked-up micros.
   change, and stays neutral under 7 days. The app previously hard-coded loss=success and
   gain=warning, which is exactly backwards on a lean bulk.
 - **Grid/flex children need `min-width:0`.** Without it the widest descendant stretches the whole
-  page — the six-tab row did this and put the entire body into a horizontal scroll at 375px.
+  page — the old six-tab row did this and put the entire body into a horizontal scroll at 375px.
+- **Four tabs, split by what you are DOING, not by data type** (2026-09-06). `Today` is everything
+  you enter — the workout form first, body weight below it; `Progress` is everything you look back
+  at — breadth, group tiles, weight trend, past workouts. Food keeps its own tab: its search,
+  picker and totals are too large to fold into Today without hurting both. **The workout form
+  stays the first thing on Today** — that is the gym use case and it must stay one tap from
+  launch. Verified at 375px with no horizontal scroll.
 - Exercises are a constant at the top of `app.js`. **When adding one, add it to the explicit map
   in `exerciseNameToId` (`appsscript.js`) too.** The lowercase/strip fallback only agreed with the
   app's ids by luck, and where it didn't — "Romanian Deadlift" -> `romaniandeadlift` vs the app's
@@ -102,12 +108,31 @@ Logged set -> Epley e1RM -> population percentile -> tier + division.
   dropping meaningfully past ~4. `DECAY` slips a division per 5 days after a 7-day grace, floored
   at one tier, purely for motivation — and training the group replaces the estimate with a real
   measurement immediately. The UI must keep saying it's an upkeep rule.
-- The **overall** rank is five movement **patterns** (`HEADLINE_PATTERNS`), not five named lifts,
-  each filled by its best-ranked member and counting untrained patterns as rung 0. Naming specific
-  barbell lifts assumed a barbell program — the owner trains in a building gym with a Smith machine
-  and usually no spotter, so barbell bench and back squat may never happen. A headline keyed to
-  them would have sat pinned near zero while he trained perfectly well. Smith or dumbbell bench
-  both satisfy horizontal push; leg press satisfies legs.
+- **Epley returns `w` at exactly 1 rep.** Plain Epley gives `w * 31/30` there, inflating a true
+  1RM by 3.3% and making the most accurate input the app can take one of its least accurate
+  outputs.
+- **Breadth is a CAP, not an average** (2026-09-06). Three numbers: `earned` (what the lifts say),
+  the ceiling breadth allows, and `shown` = the lower, *with the reason named*. The old blended
+  overall rank could not say what to do about itself; a cap states exactly what unlocks the next
+  tier and keeps effort visible while binding. `BREADTH_CAPS` maps patterns-trained → ceiling;
+  `CAP_FLOOR_TIER` means **nothing is ever capped below Gold** — early on, showing up is the whole
+  job, and this ladder already carries decay. When two ceilings tie, **both reasons are reported**:
+  naming one would send you to fix a constraint and leave the other holding you at the same tier.
+- **Isolation-only groups cap at Gold.** The compound/machine/isolation `weight` field forms a
+  weighted MEAN, so when every lift in a group shares a weight the weights cancel and the penalty
+  vanishes entirely. Arms sat at Platinum 3 on two curls — exactly what that weighting's own
+  comment said could not happen. The cap is the fix; the weights still matter for mixed groups.
+- **`GRACE_SESSIONS` keeps a new lift out of its group mean** until it has been done twice.
+  Otherwise the mean punishes you for *trying*: you are bad at a lift the first time, and logging
+  it drops the group. A group with nothing established shows as `provisional` rather than hidden.
+- The five movement **patterns** (`HEADLINE_PATTERNS`) are now a coverage checklist, not a score.
+  Naming specific barbell lifts assumed a barbell program — the owner trains in a building gym
+  with a Smith machine and usually no spotter, so barbell bench and back squat may never happen.
+  Smith or dumbbell bench both satisfy horizontal push; leg press satisfies legs.
+- **Deliberately unranked, do not "fix":** push-ups at `To 90°` (partial ROM against full-ROM
+  standards overstates by ~16%), bodyweight split squat (Strength Level's "Bulgarian Split Squat"
+  is a *barbell* lift, so no rep curve exists), captain's-chair leg raise (easier than hanging).
+  Ranking these would mean inventing a standard.
 
 ## Testing (no Node on the owner's Mac)
 - **JS syntax check**: JXA compiles without executing —
@@ -118,6 +143,21 @@ Logged set -> Epley e1RM -> population percentile -> tier + division.
   a missing `getLastColumn()` once produced four convincing false regressions.
 - **UI**: `preview_start` on the `workout-log` launch config (port 4174), then drive the real
   functions from the console rather than asserting on the DOM alone.
+
+## Auth
+The shared secret lives in **Script Properties** (`SHARED_SECRET`), never in `appsscript.js`.
+⚠️ **This repo is public.** The original design hardcoded `const SECRET = "..."` in the tracked
+file, which would have published it on the first commit — protection that looks real and isn't.
+Absent or empty property = open endpoint (the original behaviour), so old clients keep working.
+
+⚠️ **Rollout order.** App settings are per-browser: enter the secret in Settings on **every**
+device FIRST (the server ignores the key while the property is unset), and only then add the
+property. The reverse order stops every device syncing until each one is fixed by hand.
+
+📌 **Known weakness, not fixed:** `doGet` takes the key as a **query parameter**, so it lands in
+Google's request logs and browser history. Apps Script web apps can't take custom headers without
+tripping CORS preflight, and the POST path already uses `Content-Type: text/plain` to avoid it.
+Closing this properly means moving reads to `doPost` behind a `_type: "fetch"` branch.
 
 ## Deploy
 Push to `main` → GitHub Pages serves it. `appsscript.js` changes additionally require the owner to
@@ -130,8 +170,11 @@ common "it's broken" cause, closely followed by sync settings being per-browser.
   coverage % makes that safe and turns data entry into a progress bar. Store-brand labels
   (Kirkland bar / UF milk / coconut water, CarbMaster, Oikos, GoMacro, the rice-cake chips and
   puff bar) need photographing; national brands and whole foods can be looked up.
-- **Standards missing** for dips, split squat, tricep pulldown, leg raise, sit-ups, and for the
-  dumbbell/Smith variants of bench and squat. Those log fine and show "Unranked".
+- **Standards missing** for the dumbbell/Smith variants of bench and squat. Those log fine and
+  show "Unranked". (Dips, dumbbell split squat, tricep pushdown, hanging leg raise and sit-ups
+  were added 2026-09-06, read off Strength Level's 130 lb row — the same reference this table
+  uses, so no interpolation was involved. ⚠️ `triceppd-cable` is the weakest of them: a cable
+  percentile depends on the machine's pulley ratio.)
 - **Paste bridge**: paste the phone Project's item lines → review table → save. The "approve and
   sync" flow; matched-vs-estimated is the point of the review step.
 - **Cross-device setup** — URL and secret are typed by hand per browser. Has cost the owner time

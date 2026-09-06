@@ -14,6 +14,9 @@ A lightweight, mobile-friendly workout tracker that runs entirely in your browse
 - **Log food** — search a personal food database, tap to add, adjust servings, and watch the day's calorie and protein totals against your targets
 - **Last session reference** — automatically shows your best weight/reps from the previous session as a guide
 - **History** — browse every past workout with a collapsible set-by-set breakdown
+- **Strength ranks** — every lift scored against population strength standards, scaled to your
+  bodyweight, aggregated per muscle group, with untrained movement patterns capping how far the
+  ladder goes
 - **Progress tracking** — all-time personal bests, session count, and streak counter per exercise
 - **Google Sheets sync** *(optional)* — automatically push every saved workout to a Google Sheet via Apps Script
 - **Export / Import JSON** — back up your data or move it between devices
@@ -26,10 +29,12 @@ A lightweight, mobile-friendly workout tracker that runs entirely in your browse
 
 Open the live link above on any device. No sign-in needed.
 
-- **Log tab** — select a date, fill in your sets, and hit Save Workout
-- **History tab** — tap "View" on any session to see the full breakdown
-- **Progress tab** — see your personal bests and workout streak
-- **Settings tab** — configure Google Sheets sync, export/import data
+- **Today** — everything you enter: select a date, fill in your sets, hit Save Workout, and log
+  your body weight below it
+- **Food** — search your food database, tap to add, adjust servings, watch the day's totals
+- **Progress** — everything you look back at: movement-pattern coverage, per-muscle-group ranks
+  (tap a tile to drill into its exercises), weight trend, and every past workout
+- **Settings** — configure Google Sheets sync, export/import data
 
 Your workout history is stored in your browser's `localStorage`. It persists between sessions on the same device and browser, but is not shared across devices automatically. Use **Export/Import JSON** to move data between devices, or set up Google Sheets sync to have a cloud backup.
 
@@ -55,9 +60,22 @@ The app creates the **Weight** and **Nutrition** tabs itself on first save. To u
 the Food tab you also need a **Foods** tab, which you fill in yourself — it is the
 food database the picker searches, and nothing in the app writes to it:
 
-| A | B | C | D | E | F | G | H | I | J | K | L |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| Key | Name | Brand | Serving | Cal | P | C | Fib | Fat | Sat | Na | Verified |
+| Key | Name | Brand | Serving | *…nutrients…* | Verified | MicroSrc |
+|---|---|---|---|---|---|---|
+
+Columns are matched **by header name**, so order does not matter and the tab grows safely: the
+script appends any column it needs and never moves an existing one. The nutrient block is
+`Cal · P · C · Fib · Fat · Sat · Na · Trans · Chol · Sugar · AddSug · VitD · Ca · Fe · Potassium ·
+VitA · VitC · VitE · VitK · B6 · B12 · Folate · Mg · Zn · Alc` — start with just `Cal`/`P` if you
+like and add the rest later.
+
+- **A blank cell means "unknown", not zero.** The app reports a coverage percentage per nutrient
+  rather than inventing a deficiency out of missing data, so a half-filled tab is safe.
+- **MicroSrc** — where the numbers came from: `label` (US labels only require VitD, Ca, Fe and
+  Potassium), `usda` (looked up), or `est`. Worth recording, because a tab filled entirely from
+  labels will silently have no data for two-thirds of the nutrients.
+- **Alc** — grams of pure ethanol per serving, so the app can separate calories that build tissue
+  from calories that don't.
 
 - **Key** — a stable slug (`olipop-cherry`). Logged rows reference it, so renaming
   a food is safe but changing its key orphans history.
@@ -79,14 +97,28 @@ a pivot or a `QUERY` away; going the other direction is impossible.
 2. Delete all default code and paste the contents of [`appsscript.js`](appsscript.js) from this repo
 3. Click **Save** and give the project any name (e.g. "Lift Log Sync")
 
-### 3. (Optional) Require a shared secret
+### 3. (Recommended) Require a shared secret
 
-The endpoint is public by default — anyone with the URL can read and write. To lock
-it down, set `SECRET` at the top of `appsscript.js` to a long random string and enter
-the same value in the app's **Settings → Shared secret** field.
+The endpoint is public by default — **anyone with the URL can read and write.**
 
-> Deploy with `SECRET` blank first and confirm syncing still works, **then** set it.
-> Turning it on immediately stops every device that hasn't had the secret entered.
+Generate a long random string (`python3 -c "import secrets; print(secrets.token_urlsafe(32))"`),
+then in the Apps Script editor go to **Project Settings → Script Properties** and add:
+
+| Property | Value |
+|---|---|
+| `SHARED_SECRET` | your random string |
+
+> ⚠️ **Never put the secret in `appsscript.js`.** It is a tracked file — in this repo and
+> probably in yours — so a hardcoded secret gets published on your first commit. Script
+> Properties keep it out of git entirely. An absent or empty property leaves the endpoint
+> open, which is the default behaviour.
+
+> ⚠️ **Order matters.** Settings are stored per-browser. Enter the secret in
+> **Settings → Shared secret** on *every* device **first** — while the property is unset the
+> server ignores the key it is sent, so nothing breaks — and add the property **last**.
+> Reversed, every device stops syncing until you fix each one by hand.
+
+To rotate: change the property, then update each device. To disable: delete the property.
 
 ### 4. Deploy as a Web App
 
