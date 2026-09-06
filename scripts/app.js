@@ -1057,7 +1057,11 @@ function clearAllHistory() {
 // ── WEIGHT ────────────────────────────────────────────────────────────────
 
 async function saveWeight() {
-  const date = document.getElementById("weight-date").value;
+  // Today has ONE date, at the top of the page. Weight used to carry a second
+  // picker, which put two different dates on screen at once and let them
+  // disagree — you could log a workout for Monday and a weight for Tuesday
+  // without noticing.
+  const date = currentLogDate;
   const val  = parseFloat(document.getElementById("weight-input").value);
   if (!date)           { showToast("Select a date"); return; }
   if (isNaN(val) || val <= 0) { showToast("Enter a valid weight"); return; }
@@ -1731,12 +1735,15 @@ function renderProgress() {
 
   if (rankArea) rankArea.innerHTML = renderRanks();
 
-  // ── Per-exercise cards, filtered to the open group ─────────────────────
-  // A flat grid of every exercise only gets longer. Tapping a tile opens that
-  // group; nothing open shows nothing, which keeps the tiles as the page.
-  const ranks = allRanks();
-  if (!openGroup) return;
+  // The expanded group renders ABOVE the tiles (see renderRanks), so nothing is
+  // appended here. #progress-grid is kept as an anchor for the empty state.
+}
 
+// The exercise cards for one group, as HTML. Returned rather than appended so
+// the panel can sit above the tile grid instead of below it.
+function groupDetailHtml(group) {
+  const ranks = allRanks();
+  const out = [];
   EXERCISES.filter(ex => ex.group === openGroup).forEach(ex => {
     const r = ranks.find(x => x.id === ex.id);
     if (!r) return;   // never logged
@@ -1757,9 +1764,7 @@ function renderProgress() {
       ? `<span class="stale-flag">${r.daysSince}d untrained${r.lost > 0 ? " · rank slipping" : ""}</span>`
       : "";
 
-    const card = document.createElement("div");
-    card.className = "card progress-card";
-    card.innerHTML = `
+    out.push(`<div class="card progress-card">
       <div class="pc-head">
         <div>
           <div class="ex-name">${esc(ex.name)}${ex.legacy ? ` <span class="legacy-tag">retired</span>` : ""}</div>
@@ -1795,9 +1800,9 @@ function renderProgress() {
       <div class="pb-row pb-other">
         <span class="pb-label">${esc(o.variant)}</span>
         <span class="pb-value"><span class="rank-pill rank-pill-sm ${tierClass(o.tier)}">${o.tier} ${o.division}</span></span>
-      </div>`).join("")}`;
-    grid.appendChild(card);
+      </div>`).join("")}</div>`);
   });
+  return out.join("");
 }
 
 // Breadth checklist + per-group tiles. The old overall RANK is gone: a single
@@ -1859,8 +1864,21 @@ function renderRanks() {
             <span class="ps-via">${s.filled ? esc(s.via) : "untrained"}</span>
           </div>`).join("")}
       </div>
+      ${openGroup ? `
+      <div class="group-detail">
+        <div class="gd-head">
+          <div class="gd-title">
+            <span class="gd-group">${esc(openGroup)}</span>
+            ${(() => { const g = groupRank(openGroup); return g
+              ? `<span class="rank-pill ${tierClass(g.tier)}">${g.tier} ${g.division}</span>
+                 ${g.capped ? `<span class="gd-cap">earned ${g.earned.tier} ${g.earned.division} · held by ${esc(g.capReason)}</span>` : ""}`
+              : ""; })()}
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="toggleGroup('${esc(openGroup)}')">Close</button>
+        </div>
+        <div class="gd-cards">${groupDetailHtml(openGroup)}</div>
+      </div>` : ""}
       <div class="rank-tiles">${tiles}</div>
-      ${openGroup ? `<div class="group-open-label">${esc(openGroup)} — tap the tile again to close</div>` : ""}
       <p class="rank-note">
         Percentiles are against <strong>people who log lifts on Strength Level</strong> — a
         committed population, well above average. Thresholds scale with bodyweight, so this
@@ -2869,7 +2887,6 @@ pruneDrafts();
 currentLogDate  = todayISO();
 currentFoodDate = currentLogDate;
 document.getElementById("workout-date").value = currentLogDate;
-document.getElementById("weight-date").value   = currentLogDate;
 document.getElementById("food-date").value     = currentFoodDate;
 document.getElementById("food-meal").value     = defaultMeal();
 loadDraftOrWorkout(currentLogDate);
