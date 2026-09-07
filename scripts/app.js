@@ -597,15 +597,48 @@ function lastVariantFor(exId) {
 
 // Refresh the "Last: …" hint when the variant dropdown changes, so the target
 // on screen is always the one for the variant actually selected.
+/* The target, at the point of action. The milestone engine already knew the next
+   division and what reaches it, but it only ever appeared on Progress — a page
+   read on a laptop, not in the gym. Built here so the initial render and
+   onVariantChange share one implementation and cannot drift. */
+function goalLineHtml(ex, variant) {
+  const em = exerciseMilestone(ex.id, variant);
+  if (!em || em.kind !== "lift") return "";
+  const body = em.unit === "reps"
+    ? `Target: ${em.reps} reps → ${em.tier} ${em.division}`
+    : `Target: ${fmtNum(em.weight)} ${isPerHand(ex, variant) ? "lb/hand" : "lb"} × ${em.reps} → ${em.tier} ${em.division}`;
+  return `<div class="exercise-goal ${tierClass(em.tier)}">${esc(body)}</div>`;
+}
+
 function onVariantChange(exId) {
   const sel   = document.getElementById(`variant-${exId}`);
-  const label = document.querySelector(`.exercise-block[data-exid="${exId}"] .prev-best`);
+  const block = document.querySelector(`.exercise-block[data-exid="${exId}"]`);
+  const label = block && block.querySelector(".prev-best");
   if (!sel || !label) return;
   const ex   = EXERCISES.find(e => e.id === exId);
   const best = getLastBest(exId, sel.value);
   label.textContent = best
     ? (ex.weighted ? `Last: ${best.weight ?? "–"}lb × ${best.reps}` : `Last: ${best.reps} reps`)
     : "First session";
+
+  // Everything downstream of the variant has to move with it. The goal line and
+  // the per-hand placeholder used to be baked in at first render, so switching
+  // Dumbbell -> Barbell left a per-dumbbell prescription on screen for a
+  // variant that has no standard — the same class as the split-squat 2x error,
+  // printed on the gym-facing form.
+  const hint = block.querySelector(".exercise-hint");
+  if (hint) hint.textContent = exerciseHint(ex, sel.value) || "";
+  const old = block.querySelector(".exercise-goal");
+  if (old) old.remove();
+  const html = goalLineHtml(ex, sel.value);
+  if (html && hint) hint.insertAdjacentHTML("afterend", html);
+
+  const perHand = isPerHand(ex, sel.value);
+  block.querySelectorAll("tr .num-input:first-child").forEach(inp => {
+    if (inp.getAttribute("aria-label")?.startsWith("Weight")) {
+      inp.placeholder = perHand ? "lb/hand" : "lbs";
+    }
+  });
   saveDraft(currentLogDate);
 }
 
@@ -654,17 +687,7 @@ function addExerciseToLog(exId, prefilledSets = null, prefilledVariant = null) {
     ? (ex.weighted ? `Last: ${best.weight ?? "–"}lb × ${best.reps}` : `Last: ${best.reps} reps`)
     : "First session";
 
-  /* The target, at the point of action. The milestone engine already knows the
-     next division and what reaches it, but it only ever appeared on Progress —
-     a page reviewed on a laptop, not in the gym. A specific, graded next target
-     shown while you are deciding what to load is the whole point of having
-     computed it. */
-  const em   = exerciseMilestone(ex.id);
-  const goal = em && em.kind === "lift"
-    ? (em.unit === "reps"
-        ? `Target: ${em.reps} reps → ${em.tier} ${em.division}`
-        : `Target: ${fmtNum(em.weight)} ${isPerHand(ex, variant) ? "lb/hand" : "lb"} × ${em.reps} → ${em.tier} ${em.division}`)
-    : "";
+  const goalHtml = goalLineHtml(ex, variant);
   const variantSel = !ex.lockedVariant && ex.variants && ex.variants.length > 1
     ? `<select class="select-input variant-select" id="variant-${ex.id}"
                aria-label="${ex.name} variant" onchange="onVariantChange('${ex.id}')">
@@ -681,7 +704,7 @@ function addExerciseToLog(exId, prefilledSets = null, prefilledVariant = null) {
       <div class="exercise-title">
         <div class="exercise-name">${ex.name}</div>
         ${exerciseHint(ex, variant) ? `<div class="exercise-hint">${exerciseHint(ex, variant)}</div>` : ""}
-        ${goal ? `<div class="exercise-goal ${em ? tierClass(em.tier) : ""}">${esc(goal)}</div>` : ""}
+        ${goalHtml}
         ${variantSel}
       </div>
       <div style="display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap;justify-content:flex-end">
@@ -1603,7 +1626,8 @@ function rankForExercise(exId, asOf) {
     });
 
   return { ...base, ranked: true, pct, peak, lost, stale, unmeasured, others,
-           value: best.value, reps: best.reps, bestDate: best.date,
+           value: best.value, reps: best.reps, bestWeight: best.weight,
+           bestDate: best.date,
            confidence: e1rmConfidence(best.reps), unit: std.kind,
            ...rungToTier(rung) };
 }
@@ -1658,8 +1682,14 @@ function nextRungStep(rung) {
   // rungToTier called it Silver 3 — the division it just left. The target then
   // rendered as "Silver 2 -> Silver 2", and Arms as "Gold 2 -> Gold 2".
   // Nudging inside the next division costs nothing and removes the whole class.
-  const EPS = 1e-9;
-  return (Math.floor(rung * 3 + EPS) + 1) / 3 + EPS;
+  /* Nudge the OUTPUT only. An input-side epsilon rounds any rung within ~3e-10
+     below a boundary up a slot, so rungToTier and this disagreed and a division
+     got skipped — and at the top, Champion 2 produced 6.000000001 and reported
+     "top tier reached" with the milestone gone. Deriving the slot the way
+     rungToTier does keeps the two in step. */
+  const c = Math.max(0, Math.min(TIERS.length - 0.001, rung));
+  const i = Math.floor(c);
+  return (i * 3 + Math.floor((c - i) * 3) + 1) / 3 + 1e-9;
 }
 
 // A rung expressed as a percentile, so it can be fed back through the inverse.
@@ -1689,9 +1719,13 @@ function prescribe(ex, targetValue, reps) {
 }
 
 // What this ONE lift needs to reach its next tier.
-function exerciseMilestone(exId) {
+function exerciseMilestone(exId, variant) {
   const r = rankForExercise(exId);
+  // A milestone for a variant you are not doing is worse than none: the log
+  // form asked for "18 lb/hand" after switching to Barbell, which is a
+  // different convention AND a variant with no standard at all.
   if (!r || !r.ranked) return null;
+  if (variant && r.variant !== variant) return null;
   const targetRung = nextRungStep(r.rung);
   if (targetRung >= TIERS.length) return { kind: "maxed", name: r.name };
   const ex  = EXERCISES.find(e => e.id === exId);
@@ -1702,6 +1736,7 @@ function exerciseMilestone(exId) {
   return { kind: "lift", id: exId, name: r.name, variant: r.variant,
            tier: t.tier, division: t.division, unit: r.unit,
            from: r.value, to: target, fromTier: r.tier, fromDivision: r.division,
+           fromReps: r.reps, fromWeight: r.bestWeight,
            ...prescribe(ex, target, r.reps) };
 }
 
@@ -1775,6 +1810,7 @@ function groupMilestone(group) {
            tier: nextT.tier, division: nextT.division,
            fromTier: gr.tier, fromDivision: gr.division,
            unit: best.unit, from: best.value, to: target, gain,
+           fromReps: best.reps, fromWeight: best.bestWeight,
            pending: pending ? pending.name : null,
            ...prescribe(ex, target, best.reps) };
 }
@@ -1788,7 +1824,15 @@ function milestoneDelta(m) {
     const d = Math.ceil(m.to) - Math.round(m.from);
     return d > 0 ? `${d} more rep${d === 1 ? "" : "s"}` : "within reach";
   }
-  const d = m.weight - (m.from / (m.reps === 1 ? 1 : 1 + m.reps / 30));
+  /* A "+X lb" delta is only meaningful against the SAME rep count. This used to
+     back-compute the from-weight as `from / (1 + reps/30)` using the PRESCRIBED
+     reps — but `prescribe` caps those at 12, so for any high-rep history the
+     anchor was a weight never lifted, and the gap always understated, always in
+     the flattering direction: leg press read "+3 lb" when the honest figure was
+     +7.5. When the rep counts differ, say so instead of inventing a number. */
+  if (m.fromWeight == null || m.fromReps == null) return "";
+  if (m.fromReps !== m.reps) return `was ${fmtNum(m.fromWeight)} × ${m.fromReps}`;
+  const d = m.weight - m.fromWeight;
   return d > 0 ? `+${fmtNum(Math.round(d * 2) / 2)} lb` : "within reach";
 }
 
@@ -1817,8 +1861,10 @@ function applyCap(rung, capTierIndex, reason) {
 // deliberately a CHECKLIST rather than a score: "4/5 · vertical pull untrained
 // · unlocks Champion" tells you what to do, where "Bronze 2" only told you how
 // you were doing. Same underlying slot logic the old overall rank used.
-function trainingBreadth(asOf) {
-  const ranks = allRanks(asOf);
+function trainingBreadth(asOf, precomputed) {
+  // groupRank already has this; recomputing doubled the cost of every render
+  // (269 allRanks calls for one group-detail view on a 420-workout log).
+  const ranks = precomputed || allRanks(asOf);
   const slots = HEADLINE_PATTERNS.map(p => {
     const candidates = ranks.filter(r => p.ids.includes(r.id) && r.ranked);
     if (!candidates.length) return { pattern: p.name, filled: false };
@@ -1843,7 +1889,8 @@ function trainingBreadth(asOf) {
 // isolation 0.5), then capped. See BREADTH above for why caps rather than a
 // blended average, and why the weights alone were not enough.
 function groupRank(group, asOf) {
-  const all = allRanks(asOf).filter(r => r.group === group && r.ranked);
+  const allR = allRanks(asOf);
+  const all  = allR.filter(r => r.group === group && r.ranked);
   if (!all.length) return null;
 
   /* New-lift grace, ASYMMETRIC. The rule exists so a bad first attempt cannot
@@ -1873,7 +1920,7 @@ function groupRank(group, asOf) {
   const days   = Math.min(...rs.map(r => r.daysSince ?? 9999));
 
   const isolationOnly = rs.every(r => r.weight <= 0.5);
-  const breadth       = trainingBreadth(asOf);
+  const breadth       = trainingBreadth(asOf, allR);
 
   // Lowest ceiling wins, and the reason travels with it.
   const caps = [{ index: breadth.capIndex,
@@ -1899,6 +1946,10 @@ function groupRank(group, asOf) {
            // 20-rep Epley estimate is the least trustworthy number on the page
            // and must not look like the most confident one.
            lowConfidence: rs.some(r => r.confidence && r.confidence !== "high"),
+           // Strictly >12 reps — the app's own Epley cutoff. `lowConfidence`
+           // above also catches "med" (11-12), which is fine for a "~" hint but
+           // made every point on every chart hollow.
+           veryLowConfidence: rs.some(r => r.confidence === "low"),
            capped: capped.capped, capReason: capped.reason, capIndex,
            // Why the ceiling is where it is, whether or not it currently binds.
            // capReason only exists once earned EXCEEDS the ceiling; a group
@@ -2137,7 +2188,7 @@ function renderGroupCards() {
         <div class="mg-next" aria-hidden="true">${atCeiling
           ? `<span class="mg-earned">Earned ${gr.earned.tier} ${gr.earned.division}</span> · ${esc(milestoneText(m))}`
           : nextTier
-          ? `→ <span class="mg-nexttier">${esc(nextTier)}</span> · ${esc(milestoneText(m))}${
+          ? `→ <span class="mg-nexttier ${tierClass(m.tier)}">${esc(nextTier)}</span> · ${esc(milestoneText(m))}${
               delta ? ` <span class="mg-delta">${esc(delta)}</span>` : ""}`
           : esc(milestoneText(m))}</div>
         <div class="mg-meta" aria-hidden="true">${esc(meta)}</div>
@@ -2168,40 +2219,65 @@ function groupSeries(group) {
     // DECLINE that never happened — Arms reads "Platinum 3 -> Gold 2" purely
     // because the measurement improved. Marking the soft points is the least
     // this chart owes you.
-    return gr ? { date, value: gr.earned.rung, soft: !!gr.lowConfidence } : null;
+    // `confidence === "low"` is >12 reps, the app's own documented Epley cutoff
+    // and what the caption promises. `!== "high"` also caught "med" at 11-12
+    // reps, which made every point on every chart hollow — a marker that is
+    // always on carries no information.
+    return gr ? { date, value: gr.earned.rung, soft: !!gr.veryLowConfidence } : null;
   }).filter(Boolean);
 }
 
-// A rung series wants tier gridlines, not a bare sparkline — "1.9" means
-// nothing, "Silver" does.
+/* A rung series wants tier gridlines, not a bare sparkline — "1.9" means
+   nothing, "Silver" does.
+
+   The tier labels are HTML, not SVG <text>, and that is the whole trick. An
+   SVG with a fixed viewBox scales its text with the container, so one font-size
+   cannot be right at two widths: at viewBox 600 the labels rendered 5.8px on a
+   phone and ~15px on a laptop — inversely to where they were needed, and larger
+   than the caption beneath them. Positioning them as absolutely-placed spans
+   gives real CSS pixels at every width. */
 function rungChart(series) {
   if (series.length < 2) return "";
-  const W = 300, H = 90, PL = 4, PR = 4, PT = 8, PB = 8;
+  const W = 600, H = 180, PT = 12, PB = 12;
   const vals = series.map(s => s.value);
   const lo = Math.max(0, Math.floor(Math.min(...vals) * 3) / 3 - 0.34);
   const hi = Math.min(TIERS.length, Math.ceil(Math.max(...vals) * 3) / 3 + 0.34);
   const span = hi - lo || 1;
-  const x = i => PL + (i / (series.length - 1)) * (W - PL - PR);
-  const y = v => H - PB - ((v - lo) / span) * (H - PT - PB);
-  const lines = [];
-  for (let t = Math.ceil(lo); t < hi; t++) {
-    lines.push(`<line x1="0" x2="${W}" y1="${y(t).toFixed(1)}" y2="${y(t).toFixed(1)}"
-      stroke="var(--color-border)" stroke-width="1"/>
-      <text x="2" y="${(y(t) - 3).toFixed(1)}" class="rc-tick">${TIERS[t].name}</text>`);
-  }
+  const x = i => (i / (series.length - 1)) * W;
+  const yFrac = v => 1 - (v - lo) / span;                      // 0 top, 1 bottom
+  const y = v => PT + yFrac(v) * (H - PT - PB);
+
+  // At least one label, always: a series sitting entirely inside the top tier
+  // used to produce ceil(lo) === hi and draw no axis at all.
+  const first = Math.min(Math.ceil(lo), TIERS.length - 1);
+  const ticks = [];
+  for (let t = first; t < Math.max(hi, first + 1) && t < TIERS.length; t++) ticks.push(t);
+
+  const gridlines = ticks.map(t =>
+    `<line x1="0" x2="${W}" y1="${y(t).toFixed(1)}" y2="${y(t).toFixed(1)}"
+       stroke="var(--color-border)" stroke-width="1"/>`).join("");
+  const labels = ticks.map(t =>
+    `<span class="rc-label" style="top:${(PT + yFrac(t) * (H - PT - PB)) / H * 100}%">${TIERS[t].name}</span>`).join("");
+
   const pts = series.map((s, i) => `${x(i).toFixed(1)},${y(s.value).toFixed(1)}`);
   return `
-    <svg class="rung-chart" viewBox="0 0 ${W} ${H}" role="img"
-         aria-label="Rank over ${series.length} sessions, ${rungToTier(series[0].value).tier} to ${rungToTier(series[series.length-1].value).tier}">
-      ${lines.join("")}
-      <polyline points="${pts.join(" ")}" fill="none" stroke="var(--tier,var(--color-primary))"
-        stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-      ${pts.map((p, i) => series[i].soft
-        ? `<circle cx="${p.split(",")[0]}" cy="${p.split(",")[1]}" r="2.5" fill="var(--color-bg)"
-             stroke="var(--tier,var(--color-primary))" stroke-width="1.5"/>`
-        : `<circle cx="${p.split(",")[0]}" cy="${p.split(",")[1]}" r="2.5"
-             fill="var(--tier,var(--color-primary))"/>`).join("")}
-    </svg>`;
+    <div class="rc-wrap">
+      <svg class="rung-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+        ${gridlines}
+        <polyline points="${pts.join(" ")}" fill="none" stroke="var(--tier,var(--color-primary))"
+          stroke-width="2" vector-effect="non-scaling-stroke"
+          stroke-linejoin="round" stroke-linecap="round"/>
+      </svg>
+      <svg class="rc-dots" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+        ${pts.map((p, i) => series[i].soft
+          ? `<circle cx="${p.split(",")[0]}" cy="${p.split(",")[1]}" r="4" fill="var(--color-surface)"
+               stroke="var(--tier,var(--color-primary))" stroke-width="2"
+               vector-effect="non-scaling-stroke"/>`
+          : `<circle cx="${p.split(",")[0]}" cy="${p.split(",")[1]}" r="4"
+               fill="var(--tier,var(--color-primary))"/>`).join("")}
+      </svg>
+      ${labels}
+    </div>`;
 }
 
 /* ── one group, in detail ─────────────────────────────────────────────────
@@ -2248,7 +2324,10 @@ function groupDetailHtml(group) {
           const em = r.ranked ? exerciseMilestone(r.id) : null;
           if (!em || em.kind !== "lift") return "";
           const d = milestoneDelta(em);
-          return `<span class="exr-next">Next <b>${em.tier} ${em.division}</b>: ${
+          // The tier class goes on the <b>, not the row: --tier is inherited, and
+          // a class on .ex-row would resolve to the row's CURRENT tier, painting
+          // the next tier's name in the colour of the one it is leaving.
+          return `<span class="exr-next">Next <b class="${tierClass(em.tier)}">${em.tier} ${em.division}</b>: ${
             em.unit === "reps" ? `${em.reps} reps` : `${fmtNum(em.weight)} ${
               isPerHand(EXERCISES.find(e => e.id === r.id), r.variant) ? "lb/hand" : "lb"} × ${em.reps}`
           }${d ? ` · ${esc(d)}` : ""}</span>`;
@@ -2367,8 +2446,8 @@ function groupDetailHtml(group) {
       return `
       <div class="gd-block ${tierClass(gr.tier)}">
         <h3 class="gd-h3">${esc(group)} over time</h3>
-        <p class="gd-sub">Rank across ${series.length} sessions, before any ceiling or
-          upkeep decay — this is strength, not attendance.${series.some(p => p.soft)
+        <p class="gd-sub">Rank across ${series.length} sessions, before any tier ceiling —
+          this is strength, not attendance.${series.some(p => p.soft)
             ? ` <strong>Hollow points</strong> rest on a high-rep set, where 1RM formulas
               spread badly; a drop after one can mean the measurement got better, not you worse.`
             : ""}</p>

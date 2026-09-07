@@ -294,3 +294,35 @@ four of them are invisible in a screenshot and will recur:
 - Tier colour: `--tier` was already defined for the pills; `.mg-tier`, `.mg-bar-fill`, `.exr-next b`
   and `.gd-group` now consume it. Verify contrast in BOTH themes when touching it — light-mode
   silver is ~3.6:1, fine for the 24px headline and not for small text.
+
+## Review findings fixed 2026-09-07 (second pass)
+A code critique found 12 live defects in the milestone/chart work. The ones that will recur:
+- ⚠️ **`milestoneDelta` must compare the SAME rep count.** It back-computed the from-weight as
+  `from / (1 + reps/30)` using the PRESCRIBED reps — but `prescribe` caps at 12, so any high-rep
+  history anchored against a weight never lifted, and the gap always understated in the flattering
+  direction (leg press "+3 lb" when the honest figure was +7.5). Milestones now carry `fromWeight`
+  and `fromReps`; when the counts differ it prints "was 90 × 14" rather than inventing a delta.
+- ⚠️ **Anything derived from the variant must be re-rendered by `onVariantChange`.** The goal line
+  and the `lb/hand` placeholder were baked in at first render, so switching Dumbbell → Barbell left
+  a per-dumbbell prescription on the gym-facing form for a variant with no standard at all — the
+  split-squat 2x error, pointed the other way. `goalLineHtml` is now shared by both paths, and
+  `exerciseMilestone(id, variant)` returns null for a variant that is not the ranked one.
+- ⚠️ **`--tier` is inherited, so a tier class on an ancestor paints the WRONG tier.** `.mg-nexttier`
+  showed "Gold 3" in silver because `--tier` came from the card's current tier. The class goes on
+  the element naming the tier. `.exr-next b` had the opposite failure — no ancestor set `--tier` at
+  all (`.exr-bar` is a sibling), so the feature was inert.
+- ⚠️ **`--tier-ink` for small text and bar fills, `--tier` for display type and strokes.** Four of
+  six light-mode tier colours fail 4.5:1 as small text, and four of six fail 3:1 as a bar fill
+  against `--color-border`. Gold was 2.99:1.
+- ⚠️ **SVG `<text>` scales with the viewBox, so no font-size is right at two widths.** Axis labels
+  rendered 5.8px on a phone and ~15px on a laptop — larger than the caption. Tier labels are now
+  absolutely-positioned HTML spans over the SVG; the dots live in a second overlay because
+  `preserveAspectRatio="none"` would otherwise stretch them into ellipses.
+- **`soft` on the chart means `confidence === "low"` (>12 reps).** `!== "high"` also caught "med"
+  at 11-12, which made every point on every chart hollow — a marker that is always on says nothing.
+- **`nextRungStep` nudges the OUTPUT only.** An input-side epsilon rounded any rung within ~3e-10
+  of a boundary up a slot, skipping a division, and turned Champion 2 into "top tier reached".
+- `groupRank` passes its `allRanks` result into `trainingBreadth`; it was recomputing the whole
+  ladder a second time on every call (269 `allRanks` calls for one detail render on a large log).
+- 📌 Still open: `stamp.sh` cache-busts the assets but not `index.html` itself, so a stale HTML
+  still yields a stale script for one cache lifetime. A pre-commit hook would close it.

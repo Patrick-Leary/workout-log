@@ -3,7 +3,7 @@
   --color-bg:#f7f6f2;--color-surface:#f9f8f5;--color-surface-2:#fbfbf9;
   --color-surface-offset:#f0ede8;--color-surface-dynamic:#e6e4df;
   --color-divider:#dcd9d5;--color-border:#d4d1ca;
-  --color-text:#28251d;--color-text-muted:#7a7974;--color-text-faint:#8f8e89;
+  --color-text:#28251d;--color-text-muted:#66655f;--color-text-faint:#8f8e89;
   --color-primary:#01696f;--color-primary-hover:#0c4e54;
   --color-primary-highlight:#cedcd8;
   --color-success:#437a22;--color-success-highlight:#d4dfcc;
@@ -551,21 +551,31 @@ a,button,[role="button"],input,select{
 :root,[data-theme="light"]{
   --tier-bronze:#9c6239;--tier-silver:#78848c;--tier-gold:#b58a1e;
   --tier-platinum:#2f8d80;--tier-diamond:#3a7fc4;--tier-champion:#8f4cb8;
+  /* Text-safe variants. The graphic colours above clear 3:1 against the card at
+     headline size but four of six fail 4.5:1 for small text, and four of six
+     fail 3:1 as a bar fill against --color-border. Small text and bar fills use
+     --tier-ink; large display type and chart strokes keep --tier. */
+  --ink-bronze:#7d4d2b;--ink-silver:#5b666d;--ink-gold:#8a6712;
+  --ink-platinum:#1f6a60;--ink-diamond:#2a5f96;--ink-champion:#6f3a90;
 }
 [data-theme="dark"]{
   --tier-bronze:#c98a55;--tier-silver:#9aa6ae;--tier-gold:#d9ad3c;
   --tier-platinum:#4fbfae;--tier-diamond:#5fa4e8;--tier-champion:#b473d8;
+  --ink-bronze:#c98a55;--ink-silver:#9aa6ae;--ink-gold:#d9ad3c;
+  --ink-platinum:#4fbfae;--ink-diamond:#5fa4e8;--ink-champion:#b473d8;
 }
 @media(prefers-color-scheme:dark){:root:not([data-theme]){
   --tier-bronze:#c98a55;--tier-silver:#9aa6ae;--tier-gold:#d9ad3c;
   --tier-platinum:#4fbfae;--tier-diamond:#5fa4e8;--tier-champion:#b473d8;
+  --ink-bronze:#c98a55;--ink-silver:#9aa6ae;--ink-gold:#d9ad3c;
+  --ink-platinum:#4fbfae;--ink-diamond:#5fa4e8;--ink-champion:#b473d8;
 }}
-.tier-bronze{--tier:var(--tier-bronze)}
-.tier-silver{--tier:var(--tier-silver)}
-.tier-gold{--tier:var(--tier-gold)}
-.tier-platinum{--tier:var(--tier-platinum)}
-.tier-diamond{--tier:var(--tier-diamond)}
-.tier-champion{--tier:var(--tier-champion)}
+.tier-bronze{--tier:var(--tier-bronze);--tier-ink:var(--ink-bronze)}
+.tier-silver{--tier:var(--tier-silver);--tier-ink:var(--ink-silver)}
+.tier-gold{--tier:var(--tier-gold);--tier-ink:var(--ink-gold)}
+.tier-platinum{--tier:var(--tier-platinum);--tier-ink:var(--ink-platinum)}
+.tier-diamond{--tier:var(--tier-diamond);--tier-ink:var(--ink-diamond)}
+.tier-champion{--tier:var(--tier-champion);--tier-ink:var(--ink-champion)}
 
 
 
@@ -782,7 +792,7 @@ a,button,[role="button"],input,select{
 .mg-bar{display:block;height:5px;border-radius:3px;background:var(--color-border);
   overflow:hidden;flex:none;width:100%;min-width:0}
 .gd-prog .mg-bar{flex:1 1 auto;width:auto}
-.mg-bar-fill{display:block;height:100%;background:var(--tier,var(--color-primary));border-radius:3px}
+.mg-bar-fill{display:block;height:100%;background:var(--tier-ink,var(--color-primary));border-radius:3px}
 /* A capped group is at 100% and will never move. A solid full bar reads as
    "about to level up" — the opposite. Striped and muted says "stopped". */
 .mg-bar-capped .mg-bar-fill{background:repeating-linear-gradient(135deg,
@@ -840,7 +850,7 @@ a,button,[role="button"],input,select{
 .gd-milestone{border-color:var(--color-primary)}
 .gd-h3{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:.08em;
   color:var(--color-text-muted);margin:0 0 var(--space-2)}
-.gd-sub{font-size:var(--text-xs);color:var(--color-text-muted);margin:0 0 var(--space-3)}
+.gd-sub{font-size:var(--text-xs);color:var(--color-text);margin:0 0 var(--space-3)}
 .ms-line{font-size:var(--text-lg);font-weight:600;margin:0}
 .ms-sub{font-size:var(--text-xs);color:var(--color-text-muted);margin:var(--space-2) 0 0}
 
@@ -882,15 +892,23 @@ a,button,[role="button"],input,select{
 
 
 /* ── PROGRESS: milestone delta + per-exercise next step ────────────────── */
-.mg-nexttier{color:var(--tier,var(--color-text));font-weight:600}
+.mg-nexttier{color:var(--tier-ink,var(--color-text));font-weight:600}
 .mg-delta,.ms-delta{color:var(--color-primary);font-weight:600}
 .exr-next{grid-column:1/-1;font-size:var(--text-xs);color:var(--color-text-muted)}
-.exr-next b{color:var(--tier,var(--color-text));font-weight:600}
-.exr-bar-fill{background:var(--tier,var(--color-primary))}
+.exr-next b{color:var(--tier-ink,var(--color-text));font-weight:600}
+.exr-bar-fill{background:var(--tier-ink,var(--color-primary))}
 
 /* ── PROGRESS: rank-over-time chart ────────────────────────────────────── */
-.rung-chart{width:100%;height:auto;overflow:visible}
-.rc-tick{font-size:7px;fill:var(--color-text-faint);font-family:var(--font-mono)}
+.rc-wrap{position:relative;height:150px;margin-top:var(--space-2)}
+.rung-chart,.rc-dots{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+/* preserveAspectRatio="none" stretches the coordinate space, which would also
+   stretch the dots into ellipses — so they live in their own overlay and use a
+   non-scaling stroke. */
+.rc-dots circle{transform-box:fill-box}
+.rc-label{position:absolute;left:0;transform:translateY(-100%);
+  font-family:var(--font-mono);font-size:11px;color:var(--color-text-muted);
+  background:var(--color-surface);padding-right:4px;pointer-events:none}
+
 .rc-meta{display:flex;align-items:center;gap:var(--space-2);font-size:var(--text-sm);
   font-family:var(--font-mono);margin-bottom:var(--space-2)}
 .rc-arrow{color:var(--color-text-faint)}
@@ -898,7 +916,7 @@ a,button,[role="button"],input,select{
 /* ── PROGRESS: scoring explainer ───────────────────────────────────────── */
 .scoring{margin-top:var(--space-3);border-top:1px solid var(--color-border);padding-top:var(--space-2)}
 .scoring-head{font-size:var(--text-xs);color:var(--color-primary);cursor:pointer;
-  list-style:none;min-height:32px;display:flex;align-items:center}
+  list-style:none;min-height:40px;display:flex;align-items:center}
 .scoring-head::-webkit-details-marker{display:none}
 .scoring-head::before{content:"? ";font-weight:700}
 .scoring-body{font-size:var(--text-xs);color:var(--color-text-muted);padding-top:var(--space-2)}
@@ -907,9 +925,9 @@ a,button,[role="button"],input,select{
   align-items:baseline;margin:var(--space-3) 0}
 .legend dt{min-width:0}
 .legend dd{margin:0;min-width:0}
-.lg-tag{font-style:italic;color:var(--color-text-muted);white-space:nowrap}
+.lg-tag{font-style:italic;color:var(--color-text);white-space:nowrap}
 .lg-ceiling{color:var(--color-orange)}
-.scoring-note{color:var(--color-text-faint)}
+.scoring-note{color:var(--color-text-muted)}
 @media (max-width:420px){ .legend{grid-template-columns:1fr;gap:2px var(--space-3)}
   .legend dd{margin-bottom:var(--space-2)} }
 
@@ -922,6 +940,6 @@ a,button,[role="button"],input,select{
 }
 
 /* The next target, shown while you are deciding what to load. */
-.exercise-goal{font-size:var(--text-xs);color:var(--tier,var(--color-primary));
+.exercise-goal{font-size:var(--text-xs);color:var(--tier-ink,var(--color-primary));
   margin-top:2px;overflow-wrap:anywhere}
 .streak-forgiven{margin-left:var(--space-2);font-size:var(--text-xs);opacity:.75}
