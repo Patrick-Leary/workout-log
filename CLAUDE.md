@@ -204,6 +204,12 @@ they cannot drift. Keep `Content-Type: text/plain` on every request: it keeps th
 requests", and Apps Script cannot set response headers so it cannot answer a preflight.
 
 ## Deploy
+**Run `./stamp.sh` before committing any change to `app.js` or `style.css`.** It rewrites the
+asset URLs in `index.html` with the assets' mtimes. There is no build step by design, and without
+the stamp a browser serves a stale script against a fresh `index.html` — that cost several
+debugging rounds on 2026-09-07 (functions "missing" that were plainly on disk) and made every
+deploy need a manual hard-refresh.
+
 Push to `main` → GitHub Pages serves it. `appsscript.js` changes additionally require the owner to
 paste the new code in the Apps Script editor **and create a new deployment version** (Manage
 deployments → New version) — saving alone does not update the web app. This is the single most
@@ -254,3 +260,28 @@ four of them are invisible in a screenshot and will recur:
   a hidden tab, so focus silently never moves.
 - `showProgressView` pushes history state; without it Android back exits the app from a 3-level
   hierarchy.
+
+## Progress page — milestones and the rank chart (2026-09-07)
+- **Milestones step by DIVISION, not tier** (`nextRungStep`). A whole-tier target was unusable:
+  Back read "Lat Pulldown: 123 lb × 8" against a current 85. Divisions are thirds, so the target is
+  about a third the size. No special case is needed at the top of a tier — divisions run 3 → 1, so
+  from Silver 1 the next third IS Gold 3 and the arithmetic produces it.
+- ⚠️ **`nextRungStep` needs an epsilon.** A third is not binary-representable: the boundary
+  1.3333… reads back as frac 0.33333, `0.33333 * 3` floors to 0, and `rungToTier` returned the
+  division it had just left — so cards rendered "Silver 2 → Silver 2".
+- **`prescribe` caps weighted lifts at 12 reps.** It inherits your last rep count, and a 20-rep
+  history produced "23 lb × 20" — telling you to keep making the measurement the app itself flags
+  as low-confidence. AMRAP lifts are exempt: there, reps ARE the measure.
+- **`milestoneDelta` shows the gap** ("2 more reps", "+3 lb"). The target alone makes you subtract.
+- **`groupSeries` replays `groupRank` at past dates** via the `asOf` parameter threaded through
+  `bestSetsByVariant` → `rankForExercise` → `allRanks` → `groupRank`, plus `currentBodyweight(asOf)`.
+  Threaded rather than reimplemented: a parallel aggregation would drift from the card.
+- It plots **`earned`** — no cap, no decay. Decay is a motivational house rule and would draw
+  phantom losses across an untrained gap; a chart showing you weakening while you simply were not
+  training is worse than no chart.
+- ⚠️ **Points from high-rep sets render hollow.** Arms genuinely reads "Platinum 3 → Gold 2" because
+  20-rep curl sets extrapolated high and honest 8-rep sets then measured lower. A progression chart
+  that shows a decline for *improving your measurement* has to say so.
+- Tier colour: `--tier` was already defined for the pills; `.mg-tier`, `.mg-bar-fill`, `.exr-next b`
+  and `.gd-group` now consume it. Verify contrast in BOTH themes when touching it — light-mode
+  silver is ~3.6:1, fine for the 24px headline and not for small text.

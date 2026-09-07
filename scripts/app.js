@@ -1384,9 +1384,10 @@ function renderWeightChart() {
 
 // Latest logged bodyweight. Standards are bodyweight-indexed, so this is what
 // makes the ladder a strength-PER-POUND measure.
-function currentBodyweight() {
-  if (!weightLog.length) return STD_REF_BW;
-  const latest = weightLog.slice().sort((a, b) => b.date.localeCompare(a.date))[0];
+function currentBodyweight(asOf) {
+  const pool = asOf ? weightLog.filter(w => w.date <= asOf) : weightLog;
+  if (!pool.length) return STD_REF_BW;
+  const latest = pool.slice().sort((a, b) => b.date.localeCompare(a.date))[0];
   return Number(latest.weight) || STD_REF_BW;
 }
 
@@ -1493,7 +1494,11 @@ function setValue(ex, set) {
 // the honest baseline. Pooling picks the standing set and reports a rank the
 // lift can't back up. Ranking per variant, and reporting the most RECENT one,
 // means switching to a stricter variant resets the baseline the way it should.
-function bestSetsByVariant(exId) {
+/* `asOf` lets the whole chain be replayed at a past date, which is what the
+   group progression chart needs. Threaded rather than reimplemented: a second
+   copy of this aggregation would drift from the real one, and the whole point
+   of a history chart is that it agrees with the number on the card. */
+function bestSetsByVariant(exId, asOf) {
   const ex = EXERCISES.find(e => e.id === exId);
   if (!ex) return null;
   const byVariant = {};
@@ -1501,6 +1506,7 @@ function bestSetsByVariant(exId) {
   let lastDate = null, lastVariant = null;
 
   workouts.forEach(w => {
+    if (asOf && w.date > asOf) return;
     const logged = w.exercises.find(x => x.id === exId);
     if (!logged) return;
     const done = logged.sets.filter(s => s.reps != null);
@@ -1525,14 +1531,15 @@ function bestSetsByVariant(exId) {
 }
 
 // Full rank for one exercise, peak preserved separately from the decayed value.
-function rankForExercise(exId) {
+function rankForExercise(exId, asOf) {
   const ex = EXERCISES.find(e => e.id === exId);
   if (!ex) return null;
-  const found = bestSetsByVariant(exId);
+  const found = bestSetsByVariant(exId, asOf);
   if (!found) return null;
 
   const { byVariant, sessions, lastDate, lastVariant } = found;
-  const daysSince = daysBetween(lastDate, todayISO());
+  const bw = currentBodyweight(asOf);
+  const daysSince = daysBetween(lastDate, asOf || todayISO());
   const base = { id: exId, name: ex.name, group: ex.group, weight: ex.weight,
                  lastDate, daysSince, variant: lastVariant,
                  sessions: sessions[lastVariant] || 0 };
@@ -1545,7 +1552,7 @@ function rankForExercise(exId) {
   if (!std) return { ...base, ranked: false, reason: "no standards for this variant",
                      value: best.value, reps: best.reps };
 
-  const pct  = percentileFor(best.value, std, currentBodyweight());
+  const pct  = percentileFor(best.value, std, bw);
   const peak = tierFromPct(pct);
   if (!peak) return { ...base, ranked: false, reason: "unrankable" };
 
@@ -1557,7 +1564,7 @@ function rankForExercise(exId) {
     .filter(b => b.variant !== lastVariant)
     .map(b => {
       const s = stdForExercise(ex, b.variant);
-      const p = s ? percentileFor(b.value, s, currentBodyweight()) : null;
+      const p = s ? percentileFor(b.value, s, bw) : null;
       return { variant: b.variant, value: b.value, date: b.date,
                ...(p != null ? tierFromPct(p) : {}), pct: p };
     });
@@ -1578,8 +1585,8 @@ function applyDecay(rung, daysSince) {
   return { rung: Math.max(0, rung - lost), lost };
 }
 
-function allRanks() {
-  return EXERCISES.map(ex => rankForExercise(ex.id)).filter(Boolean);
+function allRanks(asOf) {
+  return EXERCISES.map(ex => rankForExercise(ex.id, asOf)).filter(Boolean);
 }
 
 // Apply a tier ceiling to a rung. Never drops below CAP_FLOOR_TIER, and always
@@ -1604,13 +1611,46 @@ function valueForPercentile(std, bw, targetPct) {
   return (lo + hi) / 2;
 }
 
+/* The next rung boundary ABOVE `rung`, at division granularity.
+
+   A whole-tier target was too far to be useful: Back's read "Lat Pulldown:
+   123 lb x 8" against a current 85 — a 45% jump, which is a year's work, not a
+   next session. Divisions are thirds of a tier, so the same formula gives a
+   target roughly a third the size.
+
+   It also needs no special case at the top of a tier: divisions run 3 -> 1
+   bottom to top, so from Silver 1 the next third IS Gold 3, and the arithmetic
+   produces that on its own. */
+function nextRungStep(rung) {
+  // EPS matters. A third is not representable in binary: the exact boundary
+  // 1.3333... reads back as frac 0.33333, and 0.33333 * 3 floors to 0, so
+  // rungToTier called it Silver 3 — the division it just left. The target then
+  // rendered as "Silver 2 -> Silver 2", and Arms as "Gold 2 -> Gold 2".
+  // Nudging inside the next division costs nothing and removes the whole class.
+  const EPS = 1e-9;
+  return (Math.floor(rung * 3 + EPS) + 1) / 3 + EPS;
+}
+
+// A rung expressed as a percentile, so it can be fed back through the inverse.
+function rungToPercentile(rung) {
+  const i = Math.min(TIERS.length - 1, Math.max(0, Math.floor(rung)));
+  const f = Math.min(0.999999, Math.max(0, rung - i));
+  return TIERS[i].lo + f * (TIERS[i].hi - TIERS[i].lo);
+}
+
 // An e1RM turned back into something you can actually load on a bar. Reps are
 // held at whatever you last did on the lift, because "95 lb x 8" is a
 // prescription and "e1RM 107" is a statistic.
 function prescribe(ex, targetValue, reps) {
   if (targetValue == null) return null;
+  // AMRAP/bodyweight lifts are measured IN reps, so the rep count is the target.
   if (!ex.weighted) return { reps: Math.ceil(targetValue) };
-  const r = reps || 8;
+  /* Weighted lifts inherit your last rep count — but capped at 12. Past that
+     Epley and Brzycki diverge by ~27%, which is why the app flags those e1RMs
+     as low confidence in the first place. Prescribing "23 lb x 20" would tell
+     you to keep making the measurement the app cannot trust. Fewer reps at more
+     weight hits the same e1RM and is a better set. */
+  const r = Math.min(reps || 8, 12);
   // Epley inverted; the 1-rep case is exact by definition (see epley()).
   const w = r === 1 ? targetValue : targetValue / (1 + r / 30);
   // Round up to the next 2.5 lb — you cannot load 93.7.
@@ -1621,14 +1661,16 @@ function prescribe(ex, targetValue, reps) {
 function exerciseMilestone(exId) {
   const r = rankForExercise(exId);
   if (!r || !r.ranked) return null;
-  const nextIndex = Math.floor(r.rung) + 1;
-  if (nextIndex >= TIERS.length) return { maxed: true, name: r.name };
+  const targetRung = nextRungStep(r.rung);
+  if (targetRung >= TIERS.length) return { kind: "maxed", name: r.name };
   const ex  = EXERCISES.find(e => e.id === exId);
   const std = stdForExercise(ex, r.variant);
-  const target = valueForPercentile(std, currentBodyweight(), TIERS[nextIndex].lo);
+  const target = valueForPercentile(std, currentBodyweight(), rungToPercentile(targetRung));
   if (target == null) return null;
-  return { id: exId, name: r.name, variant: r.variant, tier: TIERS[nextIndex].name,
-           unit: r.unit, from: r.value, to: target,
+  const t = rungToTier(targetRung);
+  return { kind: "lift", id: exId, name: r.name, variant: r.variant,
+           tier: t.tier, division: t.division, unit: r.unit,
+           from: r.value, to: target, fromTier: r.tier, fromDivision: r.division,
            ...prescribe(ex, target, r.reps) };
 }
 
@@ -1641,17 +1683,20 @@ function groupMilestone(group) {
   const gr = groupRank(group);
   if (!gr) return null;
 
-  const nextIndex = Math.floor(gr.rung) + 1;
-  if (nextIndex >= TIERS.length) return { kind: "maxed" };
+  const targetRung = nextRungStep(gr.rung);
+  if (targetRung >= TIERS.length) return { kind: "maxed" };
+  const nextT = rungToTier(targetRung);
 
   // A capped group cannot be lifted out of it. Saying "bench 150" here would be
   // a lie: you could hit it and the tile would not move.
   // Not "is it capped" but "is the next tier ABOVE the ceiling". A group sitting
   // exactly at its ceiling is not flagged capped, yet no amount of lifting moves
   // it either — checking the flag alone would prescribe a lift that does nothing.
-  if (nextIndex > gr.capIndex) {
+  // Compared against the ceiling's TOP, not its index: a division step inside
+  // the ceiling tier is still reachable, only steps past it are not.
+  if (targetRung > gr.capIndex + 0.999) {
     return { kind: "capped", reason: gr.capReason || gr.ceilingReason,
-             tier: TIERS[nextIndex].name };
+             tier: nextT.tier, division: nextT.division };
   }
 
   const ranks = allRanks().filter(r => r.group === group && r.ranked);
@@ -1663,7 +1708,7 @@ function groupMilestone(group) {
   const pendingAll = ranks.filter(r => (r.sessions || 0) < GRACE_SESSIONS);
 
   const wsum   = pool.reduce((s, r) => s + r.weight, 0);
-  const needed = (nextIndex - gr.rung) * wsum;
+  const needed = (targetRung - gr.rung) * wsum;
 
   /* Which lift to name. A heavier-weighted lift needs a smaller RUNG gain, but
      rungs are not equally hard to buy: low on the curve a rung is a few pounds,
@@ -1672,13 +1717,11 @@ function groupMilestone(group) {
      did the same work. So cost out every candidate and take the smallest
      RELATIVE increase, which is the honest answer to "what is easiest". */
   const candidates = pool.map(r => {
-    const targetRung = r.rung + needed / r.weight;
-    if (targetRung >= TIERS.length) return null;
+    const liftRung = r.rung + needed / r.weight;
+    if (liftRung >= TIERS.length) return null;
     const ex  = EXERCISES.find(e => e.id === r.id);
     const std = stdForExercise(ex, r.variant);
-    const ti  = Math.floor(targetRung);
-    const pct = TIERS[ti].lo + (targetRung - ti) * (TIERS[ti].hi - TIERS[ti].lo);
-    const target = valueForPercentile(std, currentBodyweight(), pct);
+    const target = valueForPercentile(std, currentBodyweight(), rungToPercentile(liftRung));
     if (target == null || !(r.value > 0)) return null;
     return { r, ex, target, ratio: target / r.value };
   }).filter(Boolean).sort((a, b) => a.ratio - b.ratio);
@@ -1690,17 +1733,34 @@ function groupMilestone(group) {
              : { kind: "outOfReach" };
   }
   const { r: best, ex, target } = pick;
+  const gain = best.unit === "reps"
+    ? Math.max(1, Math.ceil(target) - Math.round(best.value))
+    : null;
   // Only offer "or log X again" when X is a DIFFERENT lift. Naming the same one
   // twice produced "Lat Pulldown: 123 lb x 8 — or log Lat Pulldown once more",
   // which reads as two options and is one.
   const pending = pendingAll.find(r => r.id !== best.id);
   return { kind: "lift", id: best.id, name: best.name, variant: best.variant,
-           tier: TIERS[nextIndex].name, unit: best.unit, from: best.value, to: target,
+           tier: nextT.tier, division: nextT.division,
+           fromTier: gr.tier, fromDivision: gr.division,
+           unit: best.unit, from: best.value, to: target, gain,
            pending: pending ? pending.name : null,
            ...prescribe(ex, target, best.reps) };
 }
 
 // One line, ready to render.
+// The gap, not just the target. "21 / 23 · 2 more reps" beats "23 reps" — the
+// second makes you do the subtraction to find the motivating number.
+function milestoneDelta(m) {
+  if (!m || m.kind !== "lift" || m.from == null) return "";
+  if (m.unit === "reps") {
+    const d = Math.ceil(m.to) - Math.round(m.from);
+    return d > 0 ? `${d} more rep${d === 1 ? "" : "s"}` : "within reach";
+  }
+  const d = m.weight - (m.from / (m.reps === 1 ? 1 : 1 + m.reps / 30));
+  return d > 0 ? `+${fmtNum(Math.round(d * 2) / 2)} lb` : "within reach";
+}
+
 function milestoneText(m) {
   if (!m) return "";
   if (m.kind === "maxed")      return "Top tier reached";
@@ -1726,8 +1786,8 @@ function applyCap(rung, capTierIndex, reason) {
 // deliberately a CHECKLIST rather than a score: "4/5 · vertical pull untrained
 // · unlocks Champion" tells you what to do, where "Bronze 2" only told you how
 // you were doing. Same underlying slot logic the old overall rank used.
-function trainingBreadth() {
-  const ranks = allRanks();
+function trainingBreadth(asOf) {
+  const ranks = allRanks(asOf);
   const slots = HEADLINE_PATTERNS.map(p => {
     const candidates = ranks.filter(r => p.ids.includes(r.id) && r.ranked);
     if (!candidates.length) return { pattern: p.name, filled: false };
@@ -1751,8 +1811,8 @@ function trainingBreadth() {
 // Group score: weighted mean of rungs (compound 1.0 / machine 0.75 /
 // isolation 0.5), then capped. See BREADTH above for why caps rather than a
 // blended average, and why the weights alone were not enough.
-function groupRank(group) {
-  const all = allRanks().filter(r => r.group === group && r.ranked);
+function groupRank(group, asOf) {
+  const all = allRanks(asOf).filter(r => r.group === group && r.ranked);
   if (!all.length) return null;
 
   /* New-lift grace, ASYMMETRIC. The rule exists so a bad first attempt cannot
@@ -1782,7 +1842,7 @@ function groupRank(group) {
   const days   = Math.min(...rs.map(r => r.daysSince ?? 9999));
 
   const isolationOnly = rs.every(r => r.weight <= 0.5);
-  const breadth       = trainingBreadth();
+  const breadth       = trainingBreadth(asOf);
 
   // Lowest ceiling wins, and the reason travels with it.
   const caps = [{ index: breadth.capIndex,
@@ -2014,10 +2074,12 @@ function renderGroupCards() {
       gr.decayed ? "slipping — untrained" : "",
     ].filter(Boolean).join(" · ");
 
-    const nextTier = m && m.kind === "lift" ? m.tier : null;
+    const nextTier = m && m.kind === "lift" ? `${m.tier} ${m.division}` : null;
+    const delta    = milestoneDelta(m);
     const label = `${g}, ${gr.tier} ${gr.division}${atCeiling
       ? `, at ceiling, earned ${gr.earned.tier} ${gr.earned.division}`
-      : nextTier ? `, next tier ${nextTier}` : ""}. ${milestoneText(m)}. ${meta}.`;
+      : nextTier ? `, next ${nextTier}` : ""}. ${milestoneText(m)}${
+        delta ? `, ${delta}` : ""}. ${meta}.`;
 
     return `
       <button type="button" class="mg-card ${tierClass(gr.tier)}"
@@ -2033,12 +2095,72 @@ function renderGroupCards() {
         </div>
         <div class="mg-next" aria-hidden="true">${atCeiling
           ? `<span class="mg-earned">Earned ${gr.earned.tier} ${gr.earned.division}</span> · ${esc(milestoneText(m))}`
-          : `${nextTier ? `→ ${esc(nextTier)} · ` : ""}${esc(milestoneText(m))}`}</div>
+          : nextTier
+          ? `→ <span class="mg-nexttier">${esc(nextTier)}</span> · ${esc(milestoneText(m))}${
+              delta ? ` <span class="mg-delta">${esc(delta)}</span>` : ""}`
+          : esc(milestoneText(m))}</div>
         <div class="mg-meta" aria-hidden="true">${esc(meta)}</div>
       </button>`;
   }).join("");
 
   return `<div class="mg-grid">${cards}</div>`;
+}
+
+/* ── group progression over time ──────────────────────────────────────────
+   Replays groupRank at every date the group was trained.
+
+   Plots EARNED rung, not shown: decay is a motivational house rule, and
+   including it would draw phantom losses across an untrained gap — a chart
+   showing you getting weaker while you simply were not in the gym is worse
+   than no chart. Caps are excluded for the same reason: they are a statement
+   about breadth, not about strength over time.                              */
+function groupSeries(group) {
+  const ids   = new Set(EXERCISES.filter(e => e.group === group).map(e => e.id));
+  const dates = workouts
+    .filter(w => w.exercises.some(e => ids.has(e.id)))
+    .map(w => w.date).sort();
+  const seen = new Set();
+  return dates.filter(d => !seen.has(d) && seen.add(d)).map(date => {
+    const gr = groupRank(group, date);
+    // Carry confidence per point. A group whose score rests on a 20-rep set is
+    // an extrapolation, and switching to honest working sets then draws a
+    // DECLINE that never happened — Arms reads "Platinum 3 -> Gold 2" purely
+    // because the measurement improved. Marking the soft points is the least
+    // this chart owes you.
+    return gr ? { date, value: gr.earned.rung, soft: !!gr.lowConfidence } : null;
+  }).filter(Boolean);
+}
+
+// A rung series wants tier gridlines, not a bare sparkline — "1.9" means
+// nothing, "Silver" does.
+function rungChart(series) {
+  if (series.length < 2) return "";
+  const W = 300, H = 90, PL = 4, PR = 4, PT = 8, PB = 8;
+  const vals = series.map(s => s.value);
+  const lo = Math.max(0, Math.floor(Math.min(...vals) * 3) / 3 - 0.34);
+  const hi = Math.min(TIERS.length, Math.ceil(Math.max(...vals) * 3) / 3 + 0.34);
+  const span = hi - lo || 1;
+  const x = i => PL + (i / (series.length - 1)) * (W - PL - PR);
+  const y = v => H - PB - ((v - lo) / span) * (H - PT - PB);
+  const lines = [];
+  for (let t = Math.ceil(lo); t < hi; t++) {
+    lines.push(`<line x1="0" x2="${W}" y1="${y(t).toFixed(1)}" y2="${y(t).toFixed(1)}"
+      stroke="var(--color-border)" stroke-width="1"/>
+      <text x="2" y="${(y(t) - 3).toFixed(1)}" class="rc-tick">${TIERS[t].name}</text>`);
+  }
+  const pts = series.map((s, i) => `${x(i).toFixed(1)},${y(s.value).toFixed(1)}`);
+  return `
+    <svg class="rung-chart" viewBox="0 0 ${W} ${H}" role="img"
+         aria-label="Rank over ${series.length} sessions, ${rungToTier(series[0].value).tier} to ${rungToTier(series[series.length-1].value).tier}">
+      ${lines.join("")}
+      <polyline points="${pts.join(" ")}" fill="none" stroke="var(--tier,var(--color-primary))"
+        stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      ${pts.map((p, i) => series[i].soft
+        ? `<circle cx="${p.split(",")[0]}" cy="${p.split(",")[1]}" r="2.5" fill="var(--color-bg)"
+             stroke="var(--tier,var(--color-primary))" stroke-width="1.5"/>`
+        : `<circle cx="${p.split(",")[0]}" cy="${p.split(",")[1]}" r="2.5"
+             fill="var(--tier,var(--color-primary))"/>`).join("")}
+    </svg>`;
 }
 
 /* ── one group, in detail ─────────────────────────────────────────────────
@@ -2079,7 +2201,17 @@ function groupDetailHtml(group) {
           : `<span class="rank-pill rank-pill-sm rank-unranked" title="${esc(r.reason || "")}">Unranked</span>`}</span>
         <span class="exr-val">${r.value != null
           ? `${r.value.toFixed(r.unit === "reps" ? 0 : 1)}${r.unit === "reps" ? " reps" : " lb"}` : "–"}</span>
-        <span class="exr-bar"><span class="exr-bar-fill" style="width:${(f * 100).toFixed(0)}%"></span></span>
+        <span class="exr-bar ${r.ranked ? tierClass(r.tier) : ""}"><span class="exr-bar-fill" style="width:${(f * 100).toFixed(0)}%"></span></span>
+        ${(() => {
+          // Per-lift target, at the same division granularity as the group's.
+          const em = r.ranked ? exerciseMilestone(r.id) : null;
+          if (!em || em.kind !== "lift") return "";
+          const d = milestoneDelta(em);
+          return `<span class="exr-next">Next <b>${em.tier} ${em.division}</b>: ${
+            em.unit === "reps" ? `${em.reps} reps` : `${fmtNum(em.weight)} ${
+              isPerHand(EXERCISES.find(e => e.id === r.id), r.variant) ? "lb/hand" : "lb"} × ${em.reps}`
+          }${d ? ` · ${esc(d)}` : ""}</span>`;
+        })()}
         ${counts ? "" : gr.provisional
           ? `<span class="exr-pending" title="Nothing in this group has ${GRACE_SESSIONS} sessions yet, so every lift counts for now">counts provisionally</span>`
           : counted.has(r.id)
@@ -2112,18 +2244,25 @@ function groupDetailHtml(group) {
         .sort((a, b) => (Number(b.weight) || 0) - (Number(a.weight) || 0) || b.reps - a.reps)[0];
       if (!best) return;
       const ex = EXERCISES.find(x => x.id === e.id);
+      // What that session was actually worth, so you can see which ones moved you.
+      const v  = ex ? setValue(ex, best) : null;
+      const st = ex ? stdForExercise(ex, e.variant || (ex.variants && ex.variants[0])) : null;
+      const pc = v != null && st ? percentileFor(v, st, currentBodyweight()) : null;
+      const tf = pc != null ? tierFromPct(pc) : null;
       recent.push(`
         <div class="act-row">
           <span class="act-date">${formatDate(w.date)}</span>
           <span class="act-name">${esc(ex ? ex.name : e.id)}</span>
           <span class="act-set">${ex && ex.weighted && best.weight ? `${fmtNum(best.weight)} × ${best.reps}` : `${best.reps} reps`}</span>
+          <span class="act-rank">${tf
+            ? `<span class="rank-pill rank-pill-sm ${tierClass(tf.tier)}">${tf.tier} ${tf.division}</span>` : ""}</span>
         </div>`);
     });
   });
 
   return `
     <button type="button" class="back-link" onclick="showProgressView('main')">← Back to Progress</button>
-    <div class="gd-head">
+    <div class="gd-head ${tierClass(gr.tier)}">
       <div class="gd-title">
         <h2 class="gd-group">${esc(group)}</h2>
         <span class="rank-pill ${tierClass(gr.tier)}">${gr.tier} ${gr.division}</span>
@@ -2138,9 +2277,10 @@ function groupDetailHtml(group) {
 
     <div class="gd-block gd-milestone">
       <h3 class="gd-h3">Next milestone</h3>
-      <p class="ms-line">${esc(milestoneText(m))}</p>
+      <p class="ms-line">${esc(milestoneText(m))}${
+        milestoneDelta(m) ? ` <span class="ms-delta">${esc(milestoneDelta(m))}</span>` : ""}</p>
       ${m && m.kind === "lift"
-        ? `<p class="ms-sub">Takes ${esc(group)} to <strong>${esc(m.tier)}</strong>${
+        ? `<p class="ms-sub">Takes ${esc(group)} to <strong>${esc(m.tier)} ${m.division}</strong>${
             m.pending ? ` · or log ${esc(m.pending)} once more to count it toward the group` : ""}</p>`
         : m && m.kind === "capped"
         ? `<p class="ms-sub">Your lifts are already past this tier — the ceiling is holding it. Raising the ceiling is the only thing that moves it.</p>`
@@ -2149,12 +2289,54 @@ function groupDetailHtml(group) {
 
     <div class="gd-block">
       <h3 class="gd-h3">Exercises</h3>
-      <p class="gd-sub">${esc(group)} is scored from these lifts. Compounds count more than
-        isolation, and a lift needs ${GRACE_SESSIONS} sessions before it counts at all.</p>
       <div class="ex-table">${rows}</div>
+      <details class="scoring">
+        <summary class="scoring-head">How ${esc(group)} is scored</summary>
+        <div class="scoring-body">
+          <p>Each lift is scored against population standards at your bodyweight, then averaged —
+            <strong>compounds count double isolation</strong>. ${counted.size} of ${ranks.length}
+            currently count toward the rating.</p>
+          <dl class="legend">
+            <dt><span class="rank-pill rank-pill-sm tier-silver">Ranked</span></dt>
+            <dd>Counts toward the group rating.</dd>
+            <dt><span class="lg-tag">counts — 1 session</span></dt>
+            <dd>Counts already, because it <em>raises</em> the group. A second session settles it.</dd>
+            <dt><span class="lg-tag">not counted yet</span></dt>
+            <dd>One session, and below the group average — it waits rather than dragging you down.</dd>
+            <dt><span class="lg-tag">counts provisionally</span></dt>
+            <dd>Nothing here has ${GRACE_SESSIONS} sessions yet, so everything counts for now.</dd>
+            <dt><span class="rank-pill rank-pill-sm rank-unranked">Unranked</span></dt>
+            <dd>No published standard for this variant — logged, never scored.</dd>
+            <dt><span class="lg-tag lg-ceiling">at ceiling</span></dt>
+            <dd>The rating is held down by training breadth or by isolation-only work, not by strength.</dd>
+          </dl>
+          <p class="scoring-note">Percentiles are against <strong>people who log lifts on Strength
+            Level</strong> — a committed population, well above average. Thresholds scale with
+            bodyweight, so this measures strength <em>per pound</em>. Untrained groups slip after
+            ${DECAY.graceDays} days as an upkeep rule, not a claim that you got weaker.</p>
+        </div>
+      </details>
     </div>
 
-    ${progression}
+    ${(() => {
+      const series = groupSeries(group);
+      if (series.length < 2) return "";
+      const first = rungToTier(series[0].value), last = rungToTier(series[series.length - 1].value);
+      return `
+      <div class="gd-block ${tierClass(gr.tier)}">
+        <h3 class="gd-h3">${esc(group)} over time</h3>
+        <p class="gd-sub">Rank across ${series.length} sessions, before any ceiling or
+          upkeep decay — this is strength, not attendance.${series.some(p => p.soft)
+            ? ` <strong>Hollow points</strong> rest on a high-rep set, where 1RM formulas
+              spread badly; a drop after one can mean the measurement got better, not you worse.`
+            : ""}</p>
+        <div class="rc-meta"><span>${first.tier} ${first.division}</span>
+          <span class="rc-arrow">→</span><span>${last.tier} ${last.division}</span></div>
+        ${rungChart(series)}
+      </div>`;
+    })()}
+
+  ${progression}
 
     ${recent.length ? `
     <div class="gd-block">

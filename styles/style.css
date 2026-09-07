@@ -769,7 +769,10 @@ a,button,[role="button"],input,select{
   color:var(--color-text-muted);min-width:0}
 .mg-flag{font-family:var(--font-mono);color:var(--color-text-faint);margin-left:4px}
 .mg-chev{color:var(--color-text-muted);font-size:var(--text-lg);line-height:1}
-.mg-tier{font-size:var(--text-xl);font-weight:600;line-height:1.1}
+/* The tier palette already existed for the pills; the card headline — the most
+   important text on the page — was the one place not consuming it. */
+.mg-tier{font-size:var(--text-xl);font-weight:600;line-height:1.1;
+  color:var(--tier,var(--color-text))}
 .mg-tier-none{color:var(--color-text-faint)}
 
 /* Reused by the detail header, so it stays a bare bar with no card chrome.
@@ -779,7 +782,7 @@ a,button,[role="button"],input,select{
 .mg-bar{display:block;height:5px;border-radius:3px;background:var(--color-border);
   overflow:hidden;flex:none;width:100%;min-width:0}
 .gd-prog .mg-bar{flex:1 1 auto;width:auto}
-.mg-bar-fill{display:block;height:100%;background:var(--color-primary);border-radius:3px}
+.mg-bar-fill{display:block;height:100%;background:var(--tier,var(--color-primary));border-radius:3px}
 /* A capped group is at 100% and will never move. A solid full bar reads as
    "about to level up" — the opposite. Striped and muted says "stopped". */
 .mg-bar-capped .mg-bar-fill{background:repeating-linear-gradient(135deg,
@@ -826,6 +829,8 @@ a,button,[role="button"],input,select{
 
 /* ── PROGRESS: group detail ────────────────────────────────────────────── */
 .gd-head{margin-bottom:var(--space-4)}
+.gd-group{color:var(--tier,var(--color-text))}
+
 .gd-title{display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap;min-width:0}
 .gd-group{font-size:var(--text-xl);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
 .gd-prog{display:flex;align-items:center;gap:var(--space-3);margin-top:var(--space-3)}
@@ -874,3 +879,44 @@ a,button,[role="button"],input,select{
    y=0 and hid the tab bar, the page heading and part of the back link. */
 #panel-progress{scroll-margin-top:76px}
 .gd-group{margin:0}
+
+
+/* ── PROGRESS: milestone delta + per-exercise next step ────────────────── */
+.mg-nexttier{color:var(--tier,var(--color-text));font-weight:600}
+.mg-delta,.ms-delta{color:var(--color-primary);font-weight:600}
+.exr-next{grid-column:1/-1;font-size:var(--text-xs);color:var(--color-text-muted)}
+.exr-next b{color:var(--tier,var(--color-text));font-weight:600}
+.exr-bar-fill{background:var(--tier,var(--color-primary))}
+
+/* ── PROGRESS: rank-over-time chart ────────────────────────────────────── */
+.rung-chart{width:100%;height:auto;overflow:visible}
+.rc-tick{font-size:7px;fill:var(--color-text-faint);font-family:var(--font-mono)}
+.rc-meta{display:flex;align-items:center;gap:var(--space-2);font-size:var(--text-sm);
+  font-family:var(--font-mono);margin-bottom:var(--space-2)}
+.rc-arrow{color:var(--color-text-faint)}
+
+/* ── PROGRESS: scoring explainer ───────────────────────────────────────── */
+.scoring{margin-top:var(--space-3);border-top:1px solid var(--color-border);padding-top:var(--space-2)}
+.scoring-head{font-size:var(--text-xs);color:var(--color-primary);cursor:pointer;
+  list-style:none;min-height:32px;display:flex;align-items:center}
+.scoring-head::-webkit-details-marker{display:none}
+.scoring-head::before{content:"? ";font-weight:700}
+.scoring-body{font-size:var(--text-xs);color:var(--color-text-muted);padding-top:var(--space-2)}
+.scoring-body p{margin:0 0 var(--space-2)}
+.legend{display:grid;grid-template-columns:auto 1fr;gap:var(--space-2) var(--space-3);
+  align-items:baseline;margin:var(--space-3) 0}
+.legend dt{min-width:0}
+.legend dd{margin:0;min-width:0}
+.lg-tag{font-style:italic;color:var(--color-text-muted);white-space:nowrap}
+.lg-ceiling{color:var(--color-orange)}
+.scoring-note{color:var(--color-text-faint)}
+@media (max-width:420px){ .legend{grid-template-columns:1fr;gap:2px var(--space-3)}
+  .legend dd{margin-bottom:var(--space-2)} }
+
+/* Recent Activity gains a rank column. */
+.act-row{grid-template-columns:auto 1fr auto auto}
+.act-rank{justify-self:end}
+@media (max-width:420px){
+  .act-row{grid-template-columns:auto 1fr auto}
+  .act-rank{grid-column:2/-1;justify-self:start}
+}
