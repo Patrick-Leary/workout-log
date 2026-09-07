@@ -3,7 +3,7 @@
   --color-bg:#f7f6f2;--color-surface:#f9f8f5;--color-surface-2:#fbfbf9;
   --color-surface-offset:#f0ede8;--color-surface-dynamic:#e6e4df;
   --color-divider:#dcd9d5;--color-border:#d4d1ca;
-  --color-text:#28251d;--color-text-muted:#7a7974;--color-text-faint:#bab9b4;
+  --color-text:#28251d;--color-text-muted:#7a7974;--color-text-faint:#8f8e89;
   --color-primary:#01696f;--color-primary-hover:#0c4e54;
   --color-primary-highlight:#cedcd8;
   --color-success:#437a22;--color-success-highlight:#d4dfcc;
@@ -29,7 +29,7 @@
   --color-bg:#131211;--color-surface:#1a1918;--color-surface-2:#1f1e1c;
   --color-surface-offset:#252320;--color-surface-dynamic:#2d2b29;
   --color-divider:#262523;--color-border:#3a3835;
-  --color-text:#cdccca;--color-text-muted:#797876;--color-text-faint:#5a5957;
+  --color-text:#cdccca;--color-text-muted:#8a8987;--color-text-faint:#6e6d6a;
   --color-primary:#4f98a3;--color-primary-hover:#227f8b;
   --color-primary-highlight:#1f3335;
   --color-success:#6daa45;--color-success-highlight:#263321;
@@ -43,7 +43,7 @@
   --color-bg:#131211;--color-surface:#1a1918;--color-surface-2:#1f1e1c;
   --color-surface-offset:#252320;--color-surface-dynamic:#2d2b29;
   --color-divider:#262523;--color-border:#3a3835;
-  --color-text:#cdccca;--color-text-muted:#797876;--color-text-faint:#5a5957;
+  --color-text:#cdccca;--color-text-muted:#8a8987;--color-text-faint:#6e6d6a;
   --color-primary:#4f98a3;--color-primary-hover:#227f8b;
   --color-primary-highlight:#1f3335;
   --color-success:#6daa45;--color-success-highlight:#263321;
@@ -70,7 +70,8 @@ a,button,[role="button"],input,select{
   transition:color var(--transition),background var(--transition),
     border-color var(--transition),box-shadow var(--transition),opacity var(--transition)}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{
-  animation-duration:.01ms!important;transition-duration:.01ms!important}}
+  animation-duration:.01ms!important;transition-duration:.01ms!important;
+  scroll-behavior:auto!important}}
 
 /* ── LAYOUT ───────────────────────────────────────────────── */
 .app{display:grid;grid-template-rows:auto 1fr;min-height:100dvh}
@@ -566,38 +567,23 @@ a,button,[role="button"],input,select{
 .tier-diamond{--tier:var(--tier-diamond)}
 .tier-champion{--tier:var(--tier-champion)}
 
-.rank-block{margin-bottom:var(--space-6)}
-.rank-overall{
-  display:flex;align-items:center;justify-content:space-between;gap:var(--space-4);
-  flex-wrap:wrap;padding:var(--space-5);border-radius:var(--radius-lg);
-  background:color-mix(in oklch,var(--tier,var(--color-primary)) 10%,var(--color-surface));
-  border:1px solid color-mix(in oklch,var(--tier,var(--color-primary)) 35%,transparent);
-  margin-bottom:var(--space-4);
-}
-.ro-left{display:flex;flex-direction:column;gap:2px}
-.ro-label{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:.06em;
-  color:var(--color-text-muted)}
-.ro-tier{font-size:var(--text-xl);font-weight:700;line-height:1.05;
-  color:var(--tier,var(--color-primary));letter-spacing:-.02em}
-.ro-right{display:flex;flex-direction:column;align-items:flex-end;gap:2px;text-align:right}
-.ro-basis{font-size:var(--text-xs);color:var(--color-text-muted)}
-.ro-missing{font-size:var(--text-xs);color:var(--color-text-faint);max-width:30ch}
 
-.rank-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:var(--space-3)}
-.rank-tile{
-  display:flex;flex-direction:column;gap:2px;padding:var(--space-3) var(--space-4);
-  border-radius:var(--radius-md);background:var(--color-surface);
-  border:1px solid var(--color-border);
-  border-left:3px solid var(--tier,var(--color-divider));
-}
-.rank-tile-empty{opacity:.55}
-.rt-group{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:.06em;
-  color:var(--color-text-muted)}
-.rt-tier{font-size:var(--text-base);font-weight:700;color:var(--tier,var(--color-text-faint))}
-.rt-note{font-size:var(--text-xs);color:var(--color-text-faint)}
-.rt-stale{color:var(--color-orange)}
-.rank-note{font-size:var(--text-xs);color:var(--color-text-faint);
-  margin-top:var(--space-3);line-height:1.5;max-width:70ch}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 .rank-pill{
   font-size:var(--text-xs);font-weight:700;white-space:nowrap;
@@ -733,16 +719,12 @@ a,button,[role="button"],input,select{
 .main>*{min-width:0}
 
 /* ── HEADLINE PATTERN SLOTS ────────────────────────────────────── */
-.pattern-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));
-  gap:var(--space-2);margin-bottom:var(--space-4)}
-.pattern-slot{display:flex;flex-direction:column;gap:1px;padding:var(--space-2) var(--space-3);
-  border-radius:var(--radius-md);background:var(--color-surface);
-  border:1px solid var(--color-border);border-top:2px solid var(--tier,var(--color-divider))}
+
+
 .pattern-empty{opacity:.5}
-.ps-name{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted)}
-.ps-tier{font-size:var(--text-sm);font-weight:700;color:var(--tier,var(--color-text-faint))}
-.ps-via{font-size:10px;color:var(--color-text-faint);white-space:nowrap;overflow:hidden;
-  text-overflow:ellipsis}
+
+
+
 @media(max-width:480px){.pattern-row{grid-template-columns:repeat(2,1fr)}}
 
 /* ── FOOD: database drift review ───────────────────────────────────── */
@@ -773,19 +755,21 @@ a,button,[role="button"],input,select{
 .mg-grid>*{min-width:0}
 
 .mg-card{display:flex;flex-direction:column;gap:var(--space-2);width:100%;
-  padding:var(--space-4);border:1px solid var(--color-border);border-radius:var(--radius);
+  padding:var(--space-4);border:1px solid var(--color-border);border-radius:var(--radius-xl);
   background:var(--color-surface);font:inherit;text-align:left;cursor:pointer;
   transition:border-color .12s ease,transform .12s ease}
 .mg-card:hover{border-color:var(--color-primary)}
-.mg-card:active{transform:scale(.995)}
+/* :hover never fires on touch, so without this a card has no press state at
+   all on the phone. 0.5% was imperceptible. */
+.mg-card:active{transform:scale(.98);background:var(--color-surface-offset)}
 .mg-card:focus-visible{outline:2px solid var(--color-primary);outline-offset:2px}
 .mg-empty{cursor:default;opacity:.65}
 .mg-top{display:flex;align-items:center;justify-content:space-between;gap:var(--space-2)}
 .mg-name{font-size:var(--text-xs);letter-spacing:.08em;text-transform:uppercase;
   color:var(--color-text-muted);min-width:0}
 .mg-flag{font-family:var(--font-mono);color:var(--color-text-faint);margin-left:4px}
-.mg-chev{color:var(--color-text-faint);font-size:var(--text-lg);line-height:1}
-.mg-tier{font-size:var(--text-2xl);font-weight:600;line-height:1.1}
+.mg-chev{color:var(--color-text-muted);font-size:var(--text-lg);line-height:1}
+.mg-tier{font-size:var(--text-xl);font-weight:600;line-height:1.1}
 .mg-tier-none{color:var(--color-text-faint)}
 
 /* Reused by the detail header, so it stays a bare bar with no card chrome.
@@ -796,12 +780,17 @@ a,button,[role="button"],input,select{
   overflow:hidden;flex:none;width:100%;min-width:0}
 .gd-prog .mg-bar{flex:1 1 auto;width:auto}
 .mg-bar-fill{display:block;height:100%;background:var(--color-primary);border-radius:3px}
+/* A capped group is at 100% and will never move. A solid full bar reads as
+   "about to level up" — the opposite. Striped and muted says "stopped". */
+.mg-bar-capped .mg-bar-fill{background:repeating-linear-gradient(135deg,
+  var(--color-text-faint) 0 4px, transparent 4px 8px)}
+.mg-earned{color:var(--color-orange)}
 .mg-next{font-size:var(--text-xs);color:var(--color-text);min-width:0;
   overflow-wrap:anywhere}
-.mg-meta{font-size:var(--text-xs);color:var(--color-text-faint);min-width:0}
+.mg-meta{font-size:var(--text-xs);color:var(--color-text-muted);min-width:0}
 
 /* ── PROGRESS: coverage strip ──────────────────────────────────────────── */
-.coverage{border:1px solid var(--color-border);border-radius:var(--radius);
+.coverage{border:1px solid var(--color-border);border-radius:var(--radius-xl);
   margin-bottom:var(--space-4);background:var(--color-surface)}
 .cov-head{display:flex;align-items:baseline;gap:var(--space-3);flex-wrap:wrap;
   padding:var(--space-3) var(--space-4);cursor:pointer;list-style:none}
@@ -823,12 +812,15 @@ a,button,[role="button"],input,select{
 /* ── PROGRESS: link through to the log ─────────────────────────────────── */
 .history-link{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);
   width:100%;padding:var(--space-3) var(--space-4);margin-top:var(--space-4);
-  border:1px solid var(--color-border);border-radius:var(--radius);
+  border:1px solid var(--color-border);border-radius:var(--radius-xl);
   background:var(--color-surface);font:inherit;color:var(--color-text);
   cursor:pointer;text-align:left}
 .history-link:hover{border-color:var(--color-primary)}
 .hl-meta{font-size:var(--text-xs);color:var(--color-text-faint);flex:0 0 auto}
-.back-link{display:inline-block;padding:var(--space-2) 0;margin-bottom:var(--space-2);
+/* 44px minimum, and it is the ONLY way out of a sub-view — it sat at 39px with
+   11px of that under the sticky topbar. */
+.back-link{display:inline-flex;align-items:center;min-height:44px;
+  padding:var(--space-2) var(--space-3);margin:0 0 var(--space-2) calc(var(--space-3) * -1);
   background:none;border:none;font:inherit;font-size:var(--text-sm);
   color:var(--color-primary);cursor:pointer}
 
@@ -838,12 +830,12 @@ a,button,[role="button"],input,select{
 .gd-group{font-size:var(--text-xl);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
 .gd-prog{display:flex;align-items:center;gap:var(--space-3);margin-top:var(--space-3)}
 .gdp-from,.gdp-to{font-size:var(--text-xs);color:var(--color-text-faint);flex:0 0 auto}
-.gd-block{border:1px solid var(--color-border);border-radius:var(--radius);
+.gd-block{border:1px solid var(--color-border);border-radius:var(--radius-xl);
   padding:var(--space-4);margin-bottom:var(--space-3);background:var(--color-surface)}
 .gd-milestone{border-color:var(--color-primary)}
 .gd-h3{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:.08em;
   color:var(--color-text-muted);margin:0 0 var(--space-2)}
-.gd-sub{font-size:var(--text-xs);color:var(--color-text-faint);margin:0 0 var(--space-3)}
+.gd-sub{font-size:var(--text-xs);color:var(--color-text-muted);margin:0 0 var(--space-3)}
 .ms-line{font-size:var(--text-lg);font-weight:600;margin:0}
 .ms-sub{font-size:var(--text-xs);color:var(--color-text-muted);margin:var(--space-2) 0 0}
 
@@ -857,7 +849,7 @@ a,button,[role="button"],input,select{
 .exr-val{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-muted)}
 .exr-bar{grid-column:1/-1;height:3px;border-radius:2px;background:var(--color-border);overflow:hidden}
 .exr-bar-fill{display:block;height:100%;background:var(--color-primary)}
-.exr-pending{grid-column:1/-1;font-size:var(--text-xs);color:var(--color-text-faint);font-style:italic}
+.exr-pending{grid-column:1/-1;font-size:var(--text-xs);color:var(--color-text-muted);font-style:italic}
 @media (min-width:560px){
   .ex-row{grid-template-columns:1fr auto auto;align-items:baseline}
   .exr-val{justify-self:end;min-width:5.5em;text-align:right}
@@ -876,3 +868,9 @@ a,button,[role="button"],input,select{
 .act-date{color:var(--color-text-faint);flex:0 0 auto}
 .act-name{min-width:0;overflow-wrap:anywhere}
 .act-set{font-family:var(--font-mono);justify-self:end}
+
+
+/* The sticky topbar is 61px; scrollIntoView without this parked the panel at
+   y=0 and hid the tab bar, the page heading and part of the back link. */
+#panel-progress{scroll-margin-top:76px}
+.gd-group{margin:0}

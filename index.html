@@ -159,8 +159,11 @@
            log. Past workouts used to sit inline below everything, which pushed
            the six cards into a minority of the scroll. -->
       <div id="progress-main"></div>
-      <div id="progress-detail" hidden></div>
-      <div id="progress-history" hidden></div>
+      <!-- aria-live: switching views swaps innerHTML with no navigation, so a
+           screen-reader user pressing Enter on a card would otherwise hear
+           nothing at all. -->
+      <div id="progress-detail" aria-live="polite" hidden></div>
+      <div id="progress-history" aria-live="polite" hidden></div>
     </section>
 
     <!-- SETTINGS -->

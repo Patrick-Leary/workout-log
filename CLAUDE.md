@@ -122,9 +122,12 @@ Logged set -> Epley e1RM -> population percentile -> tier + division.
   weighted MEAN, so when every lift in a group shares a weight the weights cancel and the penalty
   vanishes entirely. Arms sat at Platinum 3 on two curls — exactly what that weighting's own
   comment said could not happen. The cap is the fix; the weights still matter for mixed groups.
-- **`GRACE_SESSIONS` keeps a new lift out of its group mean** until it has been done twice.
-  Otherwise the mean punishes you for *trying*: you are bad at a lift the first time, and logging
-  it drops the group. A group with nothing established shows as `provisional` rather than hidden.
+- **`GRACE_SESSIONS` grace is ASYMMETRIC**: a new lift counts immediately if it would RAISE the
+  group, and waits for a second session only if it would lower it. Symmetric grace protects against
+  a bad first attempt but also blocks good ones — on 2026-09-06 the owner's best session logged a
+  Silver 1 pulldown and a Silver 1 row while Back kept showing a rank derived entirely from a
+  12th-percentile dumbbell row. Training hard and watching the number not move is the one failure
+  this ladder cannot afford. A group with nothing established shows as `provisional`.
 - The five movement **patterns** (`HEADLINE_PATTERNS`) are now a coverage checklist, not a score.
   Naming specific barbell lifts assumed a barbell program — the owner trains in a building gym
   with a Smith machine and usually no spotter, so barbell bench and back squat may never happen.
@@ -161,8 +164,9 @@ Logged set -> Epley e1RM -> population percentile -> tier + division.
 
 ## Progress page
 Three views in one panel (`progressView`: `main` / `group` / `history`), switched by
-`showProgressView()`. Six muscle-group cards are the page; coverage is one collapsible line;
-history is a click away. It used to sit inline under everything, which pushed the cards — the
+`showProgressView()`. Six muscle-group cards ARE the page — no overall rank, no coverage section (owner's call,
+2026-09-07). The tier ceiling is still explained, on the card it constrains: a capped group's
+milestone reads "At ceiling — isolation lifts only". History is a click away. It used to sit inline under everything, which pushed the cards — the
 actual point — into a minority of the scroll.
 - **Milestones run the rank engine backwards** (`valueForPercentile`): given a tier, what lift and
   weight reaches it. Inverted by **binary search on `percentileFor`**, not a closed-form inverse
@@ -225,3 +229,28 @@ common "it's broken" cause, closely followed by sync settings being per-browser.
   three times.
 - No way to delete a *workout* date's food from the app except by emptying it and saving.
 - Service worker for true offline use.
+
+## Progress page — traps found by review (2026-09-07)
+A design critique caught five shipped defects the author's own screenshots missed. Recorded because
+four of them are invisible in a screenshot and will recur:
+- ⚠️ **`--radius` and `--text-2xl` never existed.** The scale is `--radius-sm|md|lg|xl` and
+  `--text-xs|sm|base|lg|xl`. An undefined var makes the declaration invalid at computed-value time,
+  so `font-size` silently **inherits** — the rank on every card rendered at body size, smaller than
+  the page heading, and every new surface had square corners. **Verify new custom properties
+  resolve (`getComputedStyle`) rather than trusting a screenshot; 16px vs 24px does not announce
+  itself at half scale.**
+- ⚠️ A **capped group's `rung` IS its ceiling**, so `rung % 1` is ~1 and the bar rendered 100% full
+  — the universal signal for "about to level up", on the one state that can never move. Capped bars
+  are striped (`.mg-bar-capped`) and the card names `gr.earned`.
+- ⚠️ `scrollIntoView` against the 61px sticky topbar hid the tab bar and clipped the only way out
+  of a sub-view to 28px. `#panel-progress{scroll-margin-top:76px}` plus a 44px `.back-link`.
+- ⚠️ **`--color-text-faint` was 1.85:1.** The redesign had put "provisional", "not counted yet" and
+  the confidence flag — the text that keeps the numbers honest — in the least readable colour on
+  the page. Token lifted, and those specific labels promoted to `--color-text-muted`.
+- ⚠️ The milestone printed `23 lb x 15` with no per-hand marker, reintroducing the exact ambiguity
+  that caused a 2x wrong rank the day before. `milestoneText` now appends `lb/hand` via
+  `isPerHand`. **The input placeholder and the prescription must agree.**
+- Use `setTimeout`, not `requestAnimationFrame`, for post-render focus: rAF is throttled to zero in
+  a hidden tab, so focus silently never moves.
+- `showProgressView` pushes history state; without it Android back exits the app from a 3-level
+  hierarchy.

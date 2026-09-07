@@ -520,7 +520,10 @@ function switchTab(name) {
   });
   // Progress owns three views (cards / one group / the log) and renders
   // whichever is active itself. Today keeps the weight ENTRY field only.
-  if (name === "progress") renderProgress();
+  // Coming back to Progress starts at the six cards. The likely flow is
+  // "log a set, then check progress", and landing inside a sub-page whose tab
+  // is labelled "Progress" reads as being lost rather than as being remembered.
+  if (name === "progress") { progressView = "main"; renderProgress(); }
   if (name === "settings") renderSettings();
   if (name === "food")     renderFoodTab();
 }
@@ -1018,7 +1021,7 @@ function renderHistory() {
         <div>
           <div class="history-date">${formatDate(w.date)}</div>
           <div class="history-summary">${pills}</div>
-          <div class="history-meta">${totalSets} sets</div>
+          <div class="history-meta">${totalSets} set${totalSets === 1 ? "" : "s"}</div>
         </div>
         <div class="history-actions">
           <button class="btn btn-ghost btn-sm" onclick="toggleDetail(${idx}, this)">View</button>
@@ -1704,9 +1707,13 @@ function milestoneText(m) {
   if (m.kind === "outOfReach") return "Beyond the standards table";
   if (m.kind === "capped")     return `At ceiling — ${m.reason}`;
   if (m.kind === "establish")  return `Log ${m.name} once more to count it`;
-  return m.unit === "reps"
-    ? `${m.name}: ${m.reps} reps`
-    : `${m.name}: ${fmtNum(m.weight)} lb x ${m.reps}`;
+  if (m.unit === "reps") return `${m.name}: ${m.reps} reps`;
+  // The prescription needs the same per-hand marker the INPUT got. Leaving it
+  // off is the ambiguity that produced a 2x wrong rank on 2026-09-06 — and this
+  // is the number that gets carried to the gym.
+  const ex   = EXERCISES.find(e => e.id === m.id);
+  const unit = ex && isPerHand(ex, m.variant) ? "lb/hand" : "lb";
+  return `${m.name}: ${fmtNum(m.weight)} ${unit} × ${m.reps}`;
 }
 
 function applyCap(rung, capTierIndex, reason) {
@@ -1748,13 +1755,27 @@ function groupRank(group) {
   const all = allRanks().filter(r => r.group === group && r.ranked);
   if (!all.length) return null;
 
-  // New-lift grace. A lift below GRACE_SESSIONS still gets its own card; it
-  // just does not drag the group while you are learning it. If nothing in the
-  // group is established yet the whole group is provisional rather than empty —
-  // hiding it would be worse than showing it with a caveat.
+  /* New-lift grace, ASYMMETRIC. The rule exists so a bad first attempt cannot
+     drag a group down — you are bad at a lift the first time. But a symmetric
+     version also blocks good first attempts from lifting it, and that is worse:
+     on 2026-09-06 the owner's best session ever logged a Silver 1 lat pulldown
+     and a Silver 1 seated row, and Back kept showing a rank derived entirely
+     from a 12th-percentile dumbbell row because the two new lifts had one
+     session each. Training hard and having the number go nowhere is the exact
+     failure this ladder cannot afford.
+
+     So: a new lift counts immediately if it would RAISE the group, and waits
+     for its second session only if it would lower it. */
   const established = all.filter(r => (r.sessions || 0) >= GRACE_SESSIONS);
-  const rs          = established.length ? established : all;
-  const provisional = !established.length;
+  let rs, provisional = false;
+  if (!established.length) {
+    rs = all; provisional = true;          // nothing settled yet — show it, caveated
+  } else {
+    const ew   = established.reduce((t, r) => t + r.weight, 0);
+    const emean = established.reduce((t, r) => t + r.rung * r.weight, 0) / ew;
+    rs = established.concat(
+      all.filter(r => (r.sessions || 0) < GRACE_SESSIONS && r.rung > emean));
+  }
 
   const wsum   = rs.reduce((s, r) => s + r.weight, 0);
   const earned = rs.reduce((s, r) => s + r.rung * r.weight, 0) / wsum;
@@ -1779,6 +1800,8 @@ function groupRank(group) {
 
   return { group, ...rungToTier(capped.rung), count: rs.length, daysSince: days,
            isolationOnly, thin: rs.length === 1, provisional,
+           // Only lifts actually HELD BACK — an unestablished lift that already
+           // counts (because it raised the group) is not pending anything.
            pending: all.length - rs.length,
            decayed: rs.some(r => r.lost > 0),
            // Carried up from the cards: a tile reading "Platinum 3" off a
@@ -1882,12 +1905,43 @@ function sparkline(series) {
    actual point of the page — into a minority of the scroll.                  */
 let progressView = "main";     // "main" | "group" | "history"
 
-function showProgressView(view, group) {
+function showProgressView(view, group, fromPop) {
   progressView = view;
   if (group !== undefined) openGroup = group;
   renderProgress();
+
+  /* Android's back gesture and iOS's back-swipe would otherwise leave a
+     three-level hierarchy by exiting the app. One entry per view is enough —
+     `fromPop` stops the popstate handler pushing the state it just restored. */
+  if (!fromPop) {
+    const st = { progressView: view, openGroup };
+    if (view === "main") history.replaceState(st, "");
+    else                 history.pushState(st, "");
+  }
+
   document.getElementById("panel-progress")?.scrollIntoView({ block: "start" });
+  // Focus follows the view, or a keyboard user lands on body and the way back
+  // is seven tab stops away. Screen readers get the change announced by the
+  // aria-live region on the panel.
+  if (view !== "main") {
+    // setTimeout, not requestAnimationFrame: rAF is throttled to zero in a
+    // hidden or backgrounded tab, so focus would silently never move.
+    setTimeout(() => {
+      const back = document.querySelector(
+        view === "group" ? "#progress-detail .back-link" : "#progress-history .back-link");
+      back?.focus();
+    }, 0);
+  }
 }
+
+window.addEventListener("popstate", e => {
+  const st = e.state;
+  if (!st || !st.progressView) {
+    if (progressView !== "main") showProgressView("main", undefined, true);
+    return;
+  }
+  showProgressView(st.progressView, st.openGroup, true);
+});
 
 function renderProgress() {
   const main   = document.getElementById("progress-main");
@@ -1922,7 +1976,7 @@ function renderProgress() {
     return;
   }
 
-  main.innerHTML = renderGroupCards() + renderCoverageLine() +
+  main.innerHTML = renderGroupCards() +
     `<div id="weight-trend-section"></div>
      <button type="button" class="history-link" onclick="showProgressView('history')">
        <span>Past workouts &amp; weigh-ins</span>
@@ -1931,43 +1985,56 @@ function renderProgress() {
   renderWeightTrendSection();
 }
 
-// ── six cards, the centre of the page ─────────────────────────────────────
+// ── six cards, the whole page ─────────────────────────────────────────────
 function renderGroupCards() {
   const cards = GROUPS.map(g => {
     const gr = groupRank(g);
     if (!gr) return `
-      <div class="mg-card mg-empty">
-        <div class="mg-top"><span class="mg-name">${esc(g)}</span></div>
-        <div class="mg-tier mg-tier-none">—</div>
-        <div class="mg-next">Not enough data yet</div>
-      </div>`;
+      <button type="button" class="mg-card mg-empty"
+              aria-label="${esc(g)}, nothing logged yet. Open to see what counts toward it."
+              onclick="showProgressView('group','${esc(g)}')">
+        <div class="mg-top" aria-hidden="true"><span class="mg-name">${esc(g)}</span>
+          <span class="mg-chev">›</span></div>
+        <div class="mg-tier mg-tier-none" aria-hidden="true">—</div>
+        <div class="mg-next" aria-hidden="true">Not logged yet</div>
+      </button>`;
 
-    const m    = groupMilestone(g);
-    // Position inside the current tier. `rung` is continuous, so the fraction
-    // is already there — no second calculation to disagree with the rank.
-    const frac = Math.max(0.03, Math.min(1, gr.rung - Math.floor(gr.rung)));
-    const next = m && m.kind === "lift" ? `${m.tier}` : null;
+    const m = groupMilestone(g);
+    // A capped group's rung IS its ceiling, so the raw fraction is ~1 — a full
+    // bar, which universally reads as "about to level up" and means the exact
+    // opposite here. Show it full but visibly inert, and name what was earned.
+    const atCeiling = m && m.kind === "capped";
+    const frac = atCeiling ? 1
+      : Math.max(0.03, Math.min(1, gr.rung - Math.floor(gr.rung)));
+
     const meta = [
       gr.thin ? "1 lift" : `${gr.count} lifts`,
-      gr.pending ? `${gr.pending} establishing` : "",
+      gr.pending ? `${gr.pending} not counted yet` : "",
       gr.provisional ? "provisional" : "",
+      gr.decayed ? "slipping — untrained" : "",
     ].filter(Boolean).join(" · ");
+
+    const nextTier = m && m.kind === "lift" ? m.tier : null;
+    const label = `${g}, ${gr.tier} ${gr.division}${atCeiling
+      ? `, at ceiling, earned ${gr.earned.tier} ${gr.earned.division}`
+      : nextTier ? `, next tier ${nextTier}` : ""}. ${milestoneText(m)}. ${meta}.`;
 
     return `
       <button type="button" class="mg-card ${tierClass(gr.tier)}"
+              aria-label="${esc(label)}"
               onclick="showProgressView('group','${esc(g)}')">
-        <div class="mg-top">
-          <span class="mg-name">${esc(g)}${gr.lowConfidence
-            ? `<span class="mg-flag" title="Includes a rank estimated from a high-rep set">~</span>` : ""}</span>
-          <span class="mg-chev" aria-hidden="true">›</span>
+        <div class="mg-top" aria-hidden="true">
+          <span class="mg-name">${esc(g)}</span>
+          <span class="mg-chev">›</span>
         </div>
-        <div class="mg-tier">${gr.tier} ${gr.division}</div>
-        <div class="mg-bar" role="img"
-             aria-label="${Math.round(frac * 100)}% through ${gr.tier} ${gr.division}">
+        <div class="mg-tier" aria-hidden="true">${gr.tier} ${gr.division}</div>
+        <div class="mg-bar${atCeiling ? " mg-bar-capped" : ""}" aria-hidden="true">
           <div class="mg-bar-fill" style="width:${(frac * 100).toFixed(0)}%"></div>
         </div>
-        <div class="mg-next">${next ? `→ ${esc(next)} · ` : ""}${esc(milestoneText(m))}</div>
-        <div class="mg-meta">${esc(meta)}</div>
+        <div class="mg-next" aria-hidden="true">${atCeiling
+          ? `<span class="mg-earned">Earned ${gr.earned.tier} ${gr.earned.division}</span> · ${esc(milestoneText(m))}`
+          : `${nextTier ? `→ ${esc(nextTier)} · ` : ""}${esc(milestoneText(m))}`}</div>
+        <div class="mg-meta" aria-hidden="true">${esc(meta)}</div>
       </button>`;
   }).join("");
 
@@ -1981,7 +2048,7 @@ function groupDetailHtml(group) {
   const gr = groupRank(group);
   if (!gr) return `
     <button type="button" class="back-link" onclick="showProgressView('main')">← Back to Progress</button>
-    <div class="gd-head"><span class="gd-group">${esc(group)}</span></div>
+    <div class="gd-head"><h2 class="gd-group">${esc(group)}</h2></div>
     <div class="empty-state"><h3>Nothing logged yet</h3>
       <p>Log any ${esc(group.toLowerCase())} exercise and its rank appears here.</p></div>`;
 
@@ -1991,9 +2058,19 @@ function groupDetailHtml(group) {
     ? TIERS[Math.floor(gr.rung) + 1].name : null;
 
   const ranks = allRanks().filter(r => r.group === group);
+  // Which lifts the group score actually used — mirrors groupRank's asymmetric
+  // grace so the table cannot claim a lift is excluded when it is not.
+  const est = ranks.filter(r => r.ranked && (r.sessions || 0) >= GRACE_SESSIONS);
+  const emean = est.length
+    ? est.reduce((t, r) => t + r.rung * r.weight, 0) / est.reduce((t, r) => t + r.weight, 0)
+    : null;
+  const counted = new Set(ranks.filter(r => r.ranked &&
+    ((r.sessions || 0) >= GRACE_SESSIONS || (emean !== null && r.rung > emean))).map(r => r.id));
   const rows = ranks.sort((a, b) => (b.ranked ? b.rung : -1) - (a.ranked ? a.rung : -1)).map(r => {
     const counts = (r.sessions || 0) >= GRACE_SESSIONS;
-    const f = r.ranked ? Math.max(0.03, Math.min(1, r.rung / TIERS.length)) : 0;
+    // Position WITHIN the current tier, matching the card bar. These two bars
+    // look identical, so they must not silently encode different scales.
+    const f = r.ranked ? Math.max(0.03, Math.min(1, r.rung - Math.floor(r.rung))) : 0;
     return `
       <div class="ex-row">
         <span class="exr-name">${esc(r.name)}${r.variant ? `<span class="exr-var">${esc(r.variant)}</span>` : ""}</span>
@@ -2003,7 +2080,11 @@ function groupDetailHtml(group) {
         <span class="exr-val">${r.value != null
           ? `${r.value.toFixed(r.unit === "reps" ? 0 : 1)}${r.unit === "reps" ? " reps" : " lb"}` : "–"}</span>
         <span class="exr-bar"><span class="exr-bar-fill" style="width:${(f * 100).toFixed(0)}%"></span></span>
-        ${counts ? "" : `<span class="exr-pending" title="Needs ${GRACE_SESSIONS} sessions before it counts toward the group">establishing</span>`}
+        ${counts ? "" : gr.provisional
+          ? `<span class="exr-pending" title="Nothing in this group has ${GRACE_SESSIONS} sessions yet, so every lift counts for now">counts provisionally</span>`
+          : counted.has(r.id)
+          ? `<span class="exr-pending" title="Counts already because it raises the group; a second session settles it">counts — 1 session</span>`
+          : `<span class="exr-pending" title="Needs ${GRACE_SESSIONS} sessions, or a rank above the group average, to count">not counted yet</span>`}
       </div>`;
   }).join("");
 
@@ -2044,7 +2125,7 @@ function groupDetailHtml(group) {
     <button type="button" class="back-link" onclick="showProgressView('main')">← Back to Progress</button>
     <div class="gd-head">
       <div class="gd-title">
-        <span class="gd-group">${esc(group)}</span>
+        <h2 class="gd-group">${esc(group)}</h2>
         <span class="rank-pill ${tierClass(gr.tier)}">${gr.tier} ${gr.division}</span>
       </div>
       ${nextTier ? `
@@ -2080,36 +2161,6 @@ function groupDetailHtml(group) {
       <h3 class="gd-h3">Recent activity</h3>
       <div class="act-table">${recent.join("")}</div>
     </div>` : ""}`;
-}
-
-// ── coverage: one line, not a section ─────────────────────────────────────
-// It answers a different question from the cards ("how complete is my
-// training" vs "how strong am I") and it is the quieter of the two — but it
-// cannot be dropped, because it is the only place the tier CEILING is
-// explained. A group that stops moving with no visible reason is the worst
-// failure this page could have.
-function renderCoverageLine() {
-  const b = trainingBreadth();
-  return `
-    <details class="coverage">
-      <summary class="cov-head">
-        <span class="cov-label">Training coverage</span>
-        <span class="cov-count">${b.trained}/${b.total}</span>
-        <span class="cov-sub">${b.untrained.length
-          ? `${esc(b.untrained.join(", "))} untrained`
-          : "all patterns covered"} · ceiling <strong>${esc(b.capTier)}</strong></span>
-      </summary>
-      <div class="cov-body">
-        ${b.slots.map(sl => `
-          <div class="cov-row${sl.filled ? "" : " cov-row-empty"}">
-            <span class="cov-pat">${esc(sl.pattern)}</span>
-            <span class="cov-val">${sl.filled ? `${sl.tier} ${sl.division}` : "untrained"}</span>
-            <span class="cov-via">${sl.filled ? esc(sl.via) : ""}</span>
-          </div>`).join("")}
-        ${b.unlocks ? `<p class="cov-note">One more pattern raises the ceiling to
-          <strong>${esc(b.unlocks)}</strong>.</p>` : ""}
-      </div>
-    </details>`;
 }
 
 // ── FOOD ──────────────────────────────────────────────────────────────────
