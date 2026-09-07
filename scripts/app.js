@@ -518,9 +518,9 @@ function switchTab(name) {
     document.getElementById(`tab-${id}`)?.classList.toggle("active", id === name);
     document.getElementById(`panel-${id}`)?.classList.toggle("active", id === name);
   });
-  // Progress absorbed History and the weight log, so opening it renders all
-  // three. Today keeps the weight ENTRY field only — see index.html.
-  if (name === "progress") { renderProgress(); renderHistory(); renderWeightTab(); }
+  // Progress owns three views (cards / one group / the log) and renders
+  // whichever is active itself. Today keeps the weight ENTRY field only.
+  if (name === "progress") renderProgress();
   if (name === "settings") renderSettings();
   if (name === "food")     renderFoodTab();
 }
@@ -906,7 +906,7 @@ async function fetchFromSheets() {
 
     // Refresh whichever data tab is currently visible
     const activePanel = document.querySelector(".tab-panel.active")?.id;
-    if (activePanel === "panel-progress") { renderProgress(); renderHistory(); renderWeightTab(); }
+    if (activePanel === "panel-progress") renderProgress();
     if (activePanel === "panel-food")     renderFoodTab();
 
   } catch (err) {
@@ -986,6 +986,9 @@ function setWeightGoal(goal) {
 
 function renderHistory() {
   const list = document.getElementById("history-list");
+  // The list only exists while the history sub-view is open — every other
+  // caller is a refresh that should quietly do nothing.
+  if (!list) return;
 
   if (!workouts.length) {
     list.innerHTML = `
@@ -1578,6 +1581,134 @@ function allRanks() {
 
 // Apply a tier ceiling to a rung. Never drops below CAP_FLOOR_TIER, and always
 // reports what was earned so the display can show both.
+/* ── MILESTONES ───────────────────────────────────────────────────────────
+   The rank engine run backwards: given a tier you want, what lift gets you
+   there. A badge tells you where you are; this tells you what to do about it.
+
+   Inverted by BINARY SEARCH on percentileFor rather than by writing an inverse
+   normal CDF. percentileFor is monotonic in `value`, 40 iterations resolve it
+   past any precision the UI shows, and — the real reason — it reuses the
+   forward function, so the two can never disagree. A separate closed-form
+   inverse would be a second implementation of the same curve, free to drift.  */
+function valueForPercentile(std, bw, targetPct) {
+  if (!std || !(targetPct > 0)) return null;
+  let lo = 0.01, hi = 10000;
+  if (percentileFor(hi, std, bw) < targetPct) return null;   // off the top
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (percentileFor(mid, std, bw) < targetPct) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+// An e1RM turned back into something you can actually load on a bar. Reps are
+// held at whatever you last did on the lift, because "95 lb x 8" is a
+// prescription and "e1RM 107" is a statistic.
+function prescribe(ex, targetValue, reps) {
+  if (targetValue == null) return null;
+  if (!ex.weighted) return { reps: Math.ceil(targetValue) };
+  const r = reps || 8;
+  // Epley inverted; the 1-rep case is exact by definition (see epley()).
+  const w = r === 1 ? targetValue : targetValue / (1 + r / 30);
+  // Round up to the next 2.5 lb — you cannot load 93.7.
+  return { weight: Math.ceil(w / 2.5) * 2.5, reps: r };
+}
+
+// What this ONE lift needs to reach its next tier.
+function exerciseMilestone(exId) {
+  const r = rankForExercise(exId);
+  if (!r || !r.ranked) return null;
+  const nextIndex = Math.floor(r.rung) + 1;
+  if (nextIndex >= TIERS.length) return { maxed: true, name: r.name };
+  const ex  = EXERCISES.find(e => e.id === exId);
+  const std = stdForExercise(ex, r.variant);
+  const target = valueForPercentile(std, currentBodyweight(), TIERS[nextIndex].lo);
+  if (target == null) return null;
+  return { id: exId, name: r.name, variant: r.variant, tier: TIERS[nextIndex].name,
+           unit: r.unit, from: r.value, to: target,
+           ...prescribe(ex, target, r.reps) };
+}
+
+/* What the GROUP needs. Three distinct answers, and which one you get matters
+   more than the number:
+     capped      no lift will move this — the ceiling is the constraint
+     establish   a lift is one session short of counting toward the group
+     lift        train this specific movement to this specific number          */
+function groupMilestone(group) {
+  const gr = groupRank(group);
+  if (!gr) return null;
+
+  const nextIndex = Math.floor(gr.rung) + 1;
+  if (nextIndex >= TIERS.length) return { kind: "maxed" };
+
+  // A capped group cannot be lifted out of it. Saying "bench 150" here would be
+  // a lie: you could hit it and the tile would not move.
+  // Not "is it capped" but "is the next tier ABOVE the ceiling". A group sitting
+  // exactly at its ceiling is not flagged capped, yet no amount of lifting moves
+  // it either — checking the flag alone would prescribe a lift that does nothing.
+  if (nextIndex > gr.capIndex) {
+    return { kind: "capped", reason: gr.capReason || gr.ceilingReason,
+             tier: TIERS[nextIndex].name };
+  }
+
+  const ranks = allRanks().filter(r => r.group === group && r.ranked);
+  const est   = ranks.filter(r => (r.sessions || 0) >= GRACE_SESSIONS);
+  const pool  = est.length ? est : ranks;
+
+  // One more session promotes a pending lift into the group score, which can
+  // move the tile without adding a pound. Surface it when it is the cheaper win.
+  const pendingAll = ranks.filter(r => (r.sessions || 0) < GRACE_SESSIONS);
+
+  const wsum   = pool.reduce((s, r) => s + r.weight, 0);
+  const needed = (nextIndex - gr.rung) * wsum;
+
+  /* Which lift to name. A heavier-weighted lift needs a smaller RUNG gain, but
+     rungs are not equally hard to buy: low on the curve a rung is a few pounds,
+     high on it a rung is many. Picking by weight alone told this log to take
+     dumbbell rows from 15 lb to 35 — a 2.3x jump — when 10 lb on the pulldown
+     did the same work. So cost out every candidate and take the smallest
+     RELATIVE increase, which is the honest answer to "what is easiest". */
+  const candidates = pool.map(r => {
+    const targetRung = r.rung + needed / r.weight;
+    if (targetRung >= TIERS.length) return null;
+    const ex  = EXERCISES.find(e => e.id === r.id);
+    const std = stdForExercise(ex, r.variant);
+    const ti  = Math.floor(targetRung);
+    const pct = TIERS[ti].lo + (targetRung - ti) * (TIERS[ti].hi - TIERS[ti].lo);
+    const target = valueForPercentile(std, currentBodyweight(), pct);
+    if (target == null || !(r.value > 0)) return null;
+    return { r, ex, target, ratio: target / r.value };
+  }).filter(Boolean).sort((a, b) => a.ratio - b.ratio);
+
+  const pick = candidates[0];
+  if (!pick) {
+    const p = pendingAll[0];
+    return p ? { kind: "establish", name: p.name, sessions: p.sessions }
+             : { kind: "outOfReach" };
+  }
+  const { r: best, ex, target } = pick;
+  // Only offer "or log X again" when X is a DIFFERENT lift. Naming the same one
+  // twice produced "Lat Pulldown: 123 lb x 8 — or log Lat Pulldown once more",
+  // which reads as two options and is one.
+  const pending = pendingAll.find(r => r.id !== best.id);
+  return { kind: "lift", id: best.id, name: best.name, variant: best.variant,
+           tier: TIERS[nextIndex].name, unit: best.unit, from: best.value, to: target,
+           pending: pending ? pending.name : null,
+           ...prescribe(ex, target, best.reps) };
+}
+
+// One line, ready to render.
+function milestoneText(m) {
+  if (!m) return "";
+  if (m.kind === "maxed")      return "Top tier reached";
+  if (m.kind === "outOfReach") return "Beyond the standards table";
+  if (m.kind === "capped")     return `At ceiling — ${m.reason}`;
+  if (m.kind === "establish")  return `Log ${m.name} once more to count it`;
+  return m.unit === "reps"
+    ? `${m.name}: ${m.reps} reps`
+    : `${m.name}: ${fmtNum(m.weight)} lb x ${m.reps}`;
+}
+
 function applyCap(rung, capTierIndex, reason) {
   const ceiling = Math.max(capTierIndex, CAP_FLOOR_TIER) + 0.999;
   if (rung <= ceiling) return { rung, capped: false, earnedRung: rung };
@@ -1642,6 +1773,9 @@ function groupRank(group) {
   const lowest   = Math.min(...caps.map(c => c.index));
   const reason   = caps.filter(c => c.index === lowest).map(c => c.reason).join(" + ");
   const capped   = applyCap(earned, lowest, reason);
+  // The ceiling tier index, exposed so milestones can tell "one more rep gets
+  // you there" apart from "no rep will, the ceiling is the constraint".
+  const capIndex = Math.max(lowest, CAP_FLOOR_TIER);
 
   return { group, ...rungToTier(capped.rung), count: rs.length, daysSince: days,
            isolationOnly, thin: rs.length === 1, provisional,
@@ -1651,7 +1785,11 @@ function groupRank(group) {
            // 20-rep Epley estimate is the least trustworthy number on the page
            // and must not look like the most confident one.
            lowConfidence: rs.some(r => r.confidence && r.confidence !== "high"),
-           capped: capped.capped, capReason: capped.reason,
+           capped: capped.capped, capReason: capped.reason, capIndex,
+           // Why the ceiling is where it is, whether or not it currently binds.
+           // capReason only exists once earned EXCEEDS the ceiling; a group
+           // sitting just under it still needs to explain the wall ahead.
+           ceilingReason: reason,
            earned: rungToTier(capped.earnedRung) };
 }
 
@@ -1736,192 +1874,242 @@ function sparkline(series) {
     </svg>`;
 }
 
+/* ── PROGRESS ─────────────────────────────────────────────────────────────
+   Three views in one panel, because the page answers three questions and only
+   one at a time: the six groups ("how am I doing"), one group's exercises
+   ("why"), and the log ("what did I actually do"). Past workouts and weigh-ins
+   used to sit inline underneath everything, which pushed the six cards — the
+   actual point of the page — into a minority of the scroll.                  */
+let progressView = "main";     // "main" | "group" | "history"
+
+function showProgressView(view, group) {
+  progressView = view;
+  if (group !== undefined) openGroup = group;
+  renderProgress();
+  document.getElementById("panel-progress")?.scrollIntoView({ block: "start" });
+}
+
 function renderProgress() {
-  const grid       = document.getElementById("progress-grid");
+  const main   = document.getElementById("progress-main");
+  const detail = document.getElementById("progress-detail");
+  const hist   = document.getElementById("progress-history");
+  if (!main) return;
+
+  main.hidden   = progressView !== "main";
+  detail.hidden = progressView !== "group";
+  hist.hidden   = progressView !== "history";
+
   const streakArea = document.getElementById("streak-area");
-  const rankArea   = document.getElementById("rank-area");
-  grid.innerHTML   = "";
-  renderWeightTrendSection();
+  if (streakArea) {
+    const streak = calcStreak();
+    streakArea.innerHTML = streak > 0
+      ? `<div class="streak-badge">🔥 ${streak}-session streak</div>`
+      : `<div class="streak-badge streak-none">No active streak — keep going!</div>`;
+  }
 
-  const streak = calcStreak();
-  streakArea.innerHTML = streak > 0
-    ? `<div class="streak-badge">🔥 ${streak}-session streak</div>`
-    : `<div class="streak-badge streak-none">No active streak — keep going!</div>`;
-
-  if (!workouts.length) {
-    if (rankArea) rankArea.innerHTML = "";
-    grid.innerHTML = `
-      <div class="empty-state" style="grid-column:1/-1">
-        <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-        </svg>
-        <h3>No workout data yet</h3>
-        <p>Complete a few workouts to see your ranks and personal bests here.</p>
-      </div>`;
+  if (progressView === "group") { detail.innerHTML = groupDetailHtml(openGroup); return; }
+  if (progressView === "history") {
+    hist.innerHTML = `
+      <button type="button" class="back-link" onclick="showProgressView('main')">← Back to Progress</button>
+      <div class="panel-header history-head">
+        <h2 class="section-heading">Past Workouts &amp; Weigh-Ins</h2>
+        <button class="btn btn-ghost btn-sm" onclick="clearAllHistory()">Clear all</button>
+      </div>
+      <div id="weight-log-list"></div>
+      <div class="history-list" id="history-list"></div>`;
+    renderWeightLogList();
+    renderHistory();
     return;
   }
 
-  if (rankArea) rankArea.innerHTML = renderRanks();
-
-  // The expanded group renders ABOVE the tiles (see renderRanks), so nothing is
-  // appended here. #progress-grid is kept as an anchor for the empty state.
+  main.innerHTML = renderGroupCards() + renderCoverageLine() +
+    `<div id="weight-trend-section"></div>
+     <button type="button" class="history-link" onclick="showProgressView('history')">
+       <span>Past workouts &amp; weigh-ins</span>
+       <span class="hl-meta">${workouts.length} session${workouts.length === 1 ? "" : "s"} ›</span>
+     </button>`;
+  renderWeightTrendSection();
 }
 
-// The exercise cards for one group, as HTML. Returned rather than appended so
-// the panel can sit above the tile grid instead of below it.
-function groupDetailHtml(group) {
-  const ranks = allRanks();
-  const out = [];
-  EXERCISES.filter(ex => ex.group === openGroup).forEach(ex => {
-    const r = ranks.find(x => x.id === ex.id);
-    if (!r) return;   // never logged
-
-    const series = e1rmSeries(ex.id, r.variant);
-    const unit   = r.unit === "reps" ? " reps" : "lb";
-    const prev   = series.length > 1 ? series[series.length - 2].value : null;
-    const last   = series.length ? series[series.length - 1].value : null;
-    const delta  = prev != null && last != null ? last - prev : null;
-
-    // Both directions shown. The old card only ever rendered gains, which hid
-    // every regression behind silence.
-    const deltaHtml = delta == null || Math.abs(delta) < 0.05 ? ""
-      : `<span class="pb-delta ${delta > 0 ? "delta-up" : "delta-down"}">${
-          delta > 0 ? "+" : ""}${delta.toFixed(1)}${unit}</span>`;
-
-    const staleHtml = r.daysSince != null && r.daysSince > DECAY.graceDays
-      ? `<span class="stale-flag">${r.daysSince}d untrained${r.lost > 0 ? " · rank slipping" : ""}</span>`
-      : "";
-
-    out.push(`<div class="card progress-card">
-      <div class="pc-head">
-        <div>
-          <div class="ex-name">${esc(ex.name)}${ex.legacy ? ` <span class="legacy-tag">retired</span>` : ""}</div>
-          <div class="pc-sub">${esc(ex.group)}${r.variant ? ` · ${esc(r.variant)}` : ""}</div>
-        </div>
-        ${r.ranked
-          ? `<span class="rank-pill ${tierClass(r.tier)}">${rankLabel(r)}</span>`
-          : `<span class="rank-pill rank-unranked" title="${esc(r.reason || "")}">Unranked</span>`}
-      </div>
-      ${series.length > 1 ? `<div class="pc-spark">${sparkline(series)}</div>` : ""}
-      <div class="pb-row">
-        <span class="pb-label">Best ${r.unit === "reps" ? "reps" : "est. 1RM"}</span>
-        <div style="display:flex;align-items:baseline">
-          <span class="pb-value">${r.value != null ? r.value.toFixed(r.unit === "reps" ? 0 : 1) + unit : "–"}</span>${deltaHtml}
-        </div>
-      </div>
-      ${r.ranked ? `
-      <div class="pb-row">
-        <span class="pb-label">Percentile</span>
-        <span class="pb-value">${ordinal(r.pct)}
-          ${r.confidence !== "high" ? `<span class="conf-flag conf-${r.confidence}" title="Estimated from a ${r.reps}-rep set — 1RM formulas spread badly above ~12 reps (Epley and Brzycki differ by ~27% at 20 reps)">est. from ${r.reps} reps</span>` : ""}
-        </span>
-      </div>` : ""}
-      <div class="pb-row">
-        <span class="pb-label">Sessions</span>
-        <span class="pb-value">${series.length}</span>
-      </div>
-      <div class="pb-row">
-        <span class="pb-label">Last worked</span>
-        <span class="pb-value pb-date">${formatDate(r.lastDate)} ${staleHtml}</span>
-      </div>
-      ${(r.others || []).filter(o => o.tier).map(o => `
-      <div class="pb-row pb-other">
-        <span class="pb-label">${esc(o.variant)}</span>
-        <span class="pb-value"><span class="rank-pill rank-pill-sm ${tierClass(o.tier)}">${o.tier} ${o.division}</span></span>
-      </div>`).join("")}</div>`);
-  });
-  return out.join("");
-}
-
-// Breadth checklist + per-group tiles. The old overall RANK is gone: a single
-// blended number could not say what to do about itself. What it uniquely
-// carried — that untrained patterns count against you — survives as the cap,
-// which is stated rather than baked into an average.
-function renderRanks() {
-  const b = trainingBreadth();
-
-  const tiles = GROUPS.map(g => {
+// ── six cards, the centre of the page ─────────────────────────────────────
+function renderGroupCards() {
+  const cards = GROUPS.map(g => {
     const gr = groupRank(g);
     if (!gr) return `
-      <button type="button" class="rank-tile rank-tile-empty" disabled>
-        <span class="rt-group">${esc(g)}</span>
-        <span class="rt-tier">—</span>
-        <span class="rt-note">not logged</span>
-      </button>`;
-    const stale = gr.daysSince > DECAY.graceDays;
-    const open  = openGroup === g;
-    const notes = [
+      <div class="mg-card mg-empty">
+        <div class="mg-top"><span class="mg-name">${esc(g)}</span></div>
+        <div class="mg-tier mg-tier-none">—</div>
+        <div class="mg-next">Not enough data yet</div>
+      </div>`;
+
+    const m    = groupMilestone(g);
+    // Position inside the current tier. `rung` is continuous, so the fraction
+    // is already there — no second calculation to disagree with the rank.
+    const frac = Math.max(0.03, Math.min(1, gr.rung - Math.floor(gr.rung)));
+    const next = m && m.kind === "lift" ? `${m.tier}` : null;
+    const meta = [
       gr.thin ? "1 lift" : `${gr.count} lifts`,
-      gr.pending  ? `${gr.pending} establishing` : "",
-      gr.isolationOnly ? "isolation only" : "",
-      stale ? `${gr.daysSince}d` : "",
+      gr.pending ? `${gr.pending} establishing` : "",
+      gr.provisional ? "provisional" : "",
     ].filter(Boolean).join(" · ");
+
     return `
-      <button type="button" class="rank-tile ${tierClass(gr.tier)}${open ? " rank-tile-open" : ""}"
-              aria-expanded="${open}" onclick="toggleGroup('${esc(g)}')">
-        <span class="rt-group">${esc(g)}
-          ${gr.lowConfidence ? `<span class="rt-flag" title="Includes a rank estimated from a high-rep set — 1RM formulas spread badly above ~12 reps">~</span>` : ""}
-        </span>
-        <span class="rt-tier">${gr.tier} ${gr.division}</span>
-        ${gr.capped ? `<span class="rt-cap" title="Earned ${gr.earned.tier} ${gr.earned.division} — held at ${gr.tier} by ${esc(gr.capReason)}">▲ ${gr.earned.tier} earned · capped</span>` : ""}
-        <span class="rt-note">${esc(notes)}${gr.provisional ? ` · <span class="rt-prov">provisional</span>` : ""}</span>
+      <button type="button" class="mg-card ${tierClass(gr.tier)}"
+              onclick="showProgressView('group','${esc(g)}')">
+        <div class="mg-top">
+          <span class="mg-name">${esc(g)}${gr.lowConfidence
+            ? `<span class="mg-flag" title="Includes a rank estimated from a high-rep set">~</span>` : ""}</span>
+          <span class="mg-chev" aria-hidden="true">›</span>
+        </div>
+        <div class="mg-tier">${gr.tier} ${gr.division}</div>
+        <div class="mg-bar" role="img"
+             aria-label="${Math.round(frac * 100)}% through ${gr.tier} ${gr.division}">
+          <div class="mg-bar-fill" style="width:${(frac * 100).toFixed(0)}%"></div>
+        </div>
+        <div class="mg-next">${next ? `→ ${esc(next)} · ` : ""}${esc(milestoneText(m))}</div>
+        <div class="mg-meta">${esc(meta)}</div>
       </button>`;
   }).join("");
 
-  return `
-    <div class="rank-block">
-      <div class="breadth-head">
-        <div class="bh-left">
-          <span class="bh-count">${b.trained}<span class="bh-of">/${b.total}</span></span>
-          <span class="bh-label">movement patterns trained</span>
-        </div>
-        <div class="bh-right">
-          ${b.untrained.length
-            ? `<span class="bh-todo">Not yet trained: <strong>${esc(b.untrained.join(", "))}</strong></span>`
-            : `<span class="bh-done">All five patterns covered</span>`}
-          ${b.unlocks
-            ? `<span class="bh-unlock">One more pattern unlocks <strong>${esc(b.unlocks)}</strong></span>`
-            : `<span class="bh-unlock">Ceiling: <strong>${esc(b.capTier)}</strong></span>`}
-        </div>
-      </div>
-      <div class="pattern-row">
-        ${b.slots.map(s => `
-          <div class="pattern-slot${s.filled ? " " + tierClass(s.tier) : " pattern-empty"}">
-            <span class="ps-name">${esc(s.pattern)}</span>
-            <span class="ps-tier">${s.filled ? `${s.tier} ${s.division}` : "—"}</span>
-            <span class="ps-via">${s.filled ? esc(s.via) : "untrained"}</span>
-          </div>`).join("")}
-      </div>
-      ${openGroup ? `
-      <div class="group-detail">
-        <div class="gd-head">
-          <div class="gd-title">
-            <span class="gd-group">${esc(openGroup)}</span>
-            ${(() => { const g = groupRank(openGroup); return g
-              ? `<span class="rank-pill ${tierClass(g.tier)}">${g.tier} ${g.division}</span>
-                 ${g.capped ? `<span class="gd-cap">earned ${g.earned.tier} ${g.earned.division} · held by ${esc(g.capReason)}</span>` : ""}`
-              : ""; })()}
-          </div>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="toggleGroup('${esc(openGroup)}')">Close</button>
-        </div>
-        <div class="gd-cards">${groupDetailHtml(openGroup)}</div>
-      </div>` : ""}
-      <div class="rank-tiles">${tiles}</div>
-      <p class="rank-note">
-        Percentiles are against <strong>people who log lifts on Strength Level</strong> — a
-        committed population, well above average. Thresholds scale with bodyweight, so this
-        measures strength <em>per pound</em>. Untrained groups slip after ${DECAY.graceDays}
-        days as an upkeep rule, not a claim that you got weaker. A tier ceiling from breadth
-        or from isolation-only training never drops below <strong>${TIERS[CAP_FLOOR_TIER].name}</strong>
-        — early on, showing up is the whole job.
-      </p>
-    </div>`;
+  return `<div class="mg-grid">${cards}</div>`;
 }
 
-// Tapping the open group closes it, so the tiles can be the whole page again.
-function toggleGroup(g) {
-  openGroup = openGroup === g ? null : g;
-  renderProgress();
+/* ── one group, in detail ─────────────────────────────────────────────────
+   Answers "why am I this rank" and "what moves it". Deliberately ordered:
+   the milestone comes FIRST, because it is the only part you can act on.    */
+function groupDetailHtml(group) {
+  const gr = groupRank(group);
+  if (!gr) return `
+    <button type="button" class="back-link" onclick="showProgressView('main')">← Back to Progress</button>
+    <div class="gd-head"><span class="gd-group">${esc(group)}</span></div>
+    <div class="empty-state"><h3>Nothing logged yet</h3>
+      <p>Log any ${esc(group.toLowerCase())} exercise and its rank appears here.</p></div>`;
+
+  const m    = groupMilestone(group);
+  const frac = Math.max(0.03, Math.min(1, gr.rung - Math.floor(gr.rung)));
+  const nextTier = Math.floor(gr.rung) + 1 < TIERS.length
+    ? TIERS[Math.floor(gr.rung) + 1].name : null;
+
+  const ranks = allRanks().filter(r => r.group === group);
+  const rows = ranks.sort((a, b) => (b.ranked ? b.rung : -1) - (a.ranked ? a.rung : -1)).map(r => {
+    const counts = (r.sessions || 0) >= GRACE_SESSIONS;
+    const f = r.ranked ? Math.max(0.03, Math.min(1, r.rung / TIERS.length)) : 0;
+    return `
+      <div class="ex-row">
+        <span class="exr-name">${esc(r.name)}${r.variant ? `<span class="exr-var">${esc(r.variant)}</span>` : ""}</span>
+        <span class="exr-rank">${r.ranked
+          ? `<span class="rank-pill rank-pill-sm ${tierClass(r.tier)}">${r.tier} ${r.division}</span>`
+          : `<span class="rank-pill rank-pill-sm rank-unranked" title="${esc(r.reason || "")}">Unranked</span>`}</span>
+        <span class="exr-val">${r.value != null
+          ? `${r.value.toFixed(r.unit === "reps" ? 0 : 1)}${r.unit === "reps" ? " reps" : " lb"}` : "–"}</span>
+        <span class="exr-bar"><span class="exr-bar-fill" style="width:${(f * 100).toFixed(0)}%"></span></span>
+        ${counts ? "" : `<span class="exr-pending" title="Needs ${GRACE_SESSIONS} sessions before it counts toward the group">establishing</span>`}
+      </div>`;
+  }).join("");
+
+  // Progression for the group's strongest ranked lift — the one carrying it.
+  const lead = ranks.filter(r => r.ranked).sort((a, b) => b.rung - a.rung)[0];
+  const series = lead ? e1rmSeries(lead.id, lead.variant) : [];
+  const progression = series.length > 1 ? `
+    <div class="gd-block">
+      <h3 class="gd-h3">Progression</h3>
+      <div class="prog-card">
+        <div class="prog-meta">
+          <span class="prog-name">${esc(lead.name)}</span>
+          <span class="prog-delta">${series[0].value.toFixed(0)} → ${series[series.length - 1].value.toFixed(0)}${lead.unit === "reps" ? " reps" : " lb"}</span>
+        </div>
+        ${sparkline(series)}
+      </div>
+    </div>` : "";
+
+  const ids = new Set(EXERCISES.filter(e => e.group === group).map(e => e.id));
+  const recent = [];
+  workouts.slice().sort((a, b) => b.date.localeCompare(a.date)).forEach(w => {
+    w.exercises.forEach(e => {
+      if (!ids.has(e.id) || recent.length >= 6) return;
+      const best = e.sets.filter(x => x.reps != null)
+        .sort((a, b) => (Number(b.weight) || 0) - (Number(a.weight) || 0) || b.reps - a.reps)[0];
+      if (!best) return;
+      const ex = EXERCISES.find(x => x.id === e.id);
+      recent.push(`
+        <div class="act-row">
+          <span class="act-date">${formatDate(w.date)}</span>
+          <span class="act-name">${esc(ex ? ex.name : e.id)}</span>
+          <span class="act-set">${ex && ex.weighted && best.weight ? `${fmtNum(best.weight)} × ${best.reps}` : `${best.reps} reps`}</span>
+        </div>`);
+    });
+  });
+
+  return `
+    <button type="button" class="back-link" onclick="showProgressView('main')">← Back to Progress</button>
+    <div class="gd-head">
+      <div class="gd-title">
+        <span class="gd-group">${esc(group)}</span>
+        <span class="rank-pill ${tierClass(gr.tier)}">${gr.tier} ${gr.division}</span>
+      </div>
+      ${nextTier ? `
+      <div class="gd-prog">
+        <span class="gdp-from">${gr.tier} ${gr.division}</span>
+        <span class="mg-bar"><span class="mg-bar-fill" style="width:${(frac * 100).toFixed(0)}%"></span></span>
+        <span class="gdp-to">${esc(nextTier)}</span>
+      </div>` : ""}
+    </div>
+
+    <div class="gd-block gd-milestone">
+      <h3 class="gd-h3">Next milestone</h3>
+      <p class="ms-line">${esc(milestoneText(m))}</p>
+      ${m && m.kind === "lift"
+        ? `<p class="ms-sub">Takes ${esc(group)} to <strong>${esc(m.tier)}</strong>${
+            m.pending ? ` · or log ${esc(m.pending)} once more to count it toward the group` : ""}</p>`
+        : m && m.kind === "capped"
+        ? `<p class="ms-sub">Your lifts are already past this tier — the ceiling is holding it. Raising the ceiling is the only thing that moves it.</p>`
+        : ""}
+    </div>
+
+    <div class="gd-block">
+      <h3 class="gd-h3">Exercises</h3>
+      <p class="gd-sub">${esc(group)} is scored from these lifts. Compounds count more than
+        isolation, and a lift needs ${GRACE_SESSIONS} sessions before it counts at all.</p>
+      <div class="ex-table">${rows}</div>
+    </div>
+
+    ${progression}
+
+    ${recent.length ? `
+    <div class="gd-block">
+      <h3 class="gd-h3">Recent activity</h3>
+      <div class="act-table">${recent.join("")}</div>
+    </div>` : ""}`;
+}
+
+// ── coverage: one line, not a section ─────────────────────────────────────
+// It answers a different question from the cards ("how complete is my
+// training" vs "how strong am I") and it is the quieter of the two — but it
+// cannot be dropped, because it is the only place the tier CEILING is
+// explained. A group that stops moving with no visible reason is the worst
+// failure this page could have.
+function renderCoverageLine() {
+  const b = trainingBreadth();
+  return `
+    <details class="coverage">
+      <summary class="cov-head">
+        <span class="cov-label">Training coverage</span>
+        <span class="cov-count">${b.trained}/${b.total}</span>
+        <span class="cov-sub">${b.untrained.length
+          ? `${esc(b.untrained.join(", "))} untrained`
+          : "all patterns covered"} · ceiling <strong>${esc(b.capTier)}</strong></span>
+      </summary>
+      <div class="cov-body">
+        ${b.slots.map(sl => `
+          <div class="cov-row${sl.filled ? "" : " cov-row-empty"}">
+            <span class="cov-pat">${esc(sl.pattern)}</span>
+            <span class="cov-val">${sl.filled ? `${sl.tier} ${sl.division}` : "untrained"}</span>
+            <span class="cov-via">${sl.filled ? esc(sl.via) : ""}</span>
+          </div>`).join("")}
+        ${b.unlocks ? `<p class="cov-note">One more pattern raises the ceiling to
+          <strong>${esc(b.unlocks)}</strong>.</p>` : ""}
+      </div>
+    </details>`;
 }
 
 // ── FOOD ──────────────────────────────────────────────────────────────────

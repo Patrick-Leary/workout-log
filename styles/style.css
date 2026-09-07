@@ -762,42 +762,117 @@ a,button,[role="button"],input,select{
 .micro-floor{color:var(--color-text-muted);font-weight:600;margin-right:1px}
 
 
-/* ── PROGRESS: breadth checklist ───────────────────────────────────────
-   Replaces the old overall-rank banner. Reads as a to-do, not a verdict. */
-.breadth-head{display:flex;justify-content:space-between;align-items:center;gap:var(--space-4);
-  flex-wrap:wrap;padding:var(--space-4);border:1px solid var(--color-border);
-  border-radius:var(--radius);margin-bottom:var(--space-3)}
-.bh-left{display:flex;align-items:baseline;gap:var(--space-2);min-width:0}
-.bh-count{font-family:var(--font-mono);font-size:var(--text-2xl);font-weight:600}
-.bh-of{color:var(--color-text-faint);font-size:var(--text-lg)}
-.bh-label{font-size:var(--text-xs);color:var(--color-text-muted)}
-.bh-right{display:flex;flex-direction:column;gap:2px;align-items:flex-end;text-align:right;min-width:0}
-.bh-todo,.bh-done,.bh-unlock{font-size:var(--text-xs);color:var(--color-text-muted)}
-.bh-done{color:var(--color-success)}
-.bh-unlock strong{color:var(--color-primary)}
-
-/* ── PROGRESS: tiles as drill-down buttons ─────────────────────────────── */
-.rank-tile{cursor:pointer;text-align:left;font:inherit;width:100%}
-.rank-tile:disabled{cursor:default;opacity:.6}
-.rank-tile-open{outline:2px solid var(--color-primary);outline-offset:-2px}
-.rt-flag{font-family:var(--font-mono);color:var(--color-text-faint);cursor:help}
-.rt-cap{display:block;font-size:var(--text-xs);color:var(--color-orange);margin-top:2px}
-.rt-prov{color:var(--color-text-faint);font-style:italic}
-.group-open-label{font-size:var(--text-xs);color:var(--color-text-muted);
-  margin:var(--space-2) 0 var(--space-3)}
 
 
-/* ── PROGRESS: expanded group panel ────────────────────────────────────
-   Sits ABOVE the tile grid rather than filtering a list below it, so the
-   thing you tapped and the thing that opened are visible together. */
-.group-detail{border:1px solid var(--color-primary);border-radius:var(--radius);
-  padding:var(--space-4);margin-bottom:var(--space-3);background:var(--color-surface)}
-.gd-head{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);
-  flex-wrap:wrap;margin-bottom:var(--space-3)}
+/* ── PROGRESS: muscle-group cards ──────────────────────────────────────
+   Mobile-first: one column, then two, then three. The cards are the page —
+   everything else on Progress is secondary to them, so they get the width. */
+.mg-grid{display:grid;grid-template-columns:1fr;gap:var(--space-3);margin-bottom:var(--space-4)}
+@media (min-width:560px){ .mg-grid{grid-template-columns:repeat(2,1fr)} }
+@media (min-width:900px){ .mg-grid{grid-template-columns:repeat(3,1fr)} }
+.mg-grid>*{min-width:0}
+
+.mg-card{display:flex;flex-direction:column;gap:var(--space-2);width:100%;
+  padding:var(--space-4);border:1px solid var(--color-border);border-radius:var(--radius);
+  background:var(--color-surface);font:inherit;text-align:left;cursor:pointer;
+  transition:border-color .12s ease,transform .12s ease}
+.mg-card:hover{border-color:var(--color-primary)}
+.mg-card:active{transform:scale(.995)}
+.mg-card:focus-visible{outline:2px solid var(--color-primary);outline-offset:2px}
+.mg-empty{cursor:default;opacity:.65}
+.mg-top{display:flex;align-items:center;justify-content:space-between;gap:var(--space-2)}
+.mg-name{font-size:var(--text-xs);letter-spacing:.08em;text-transform:uppercase;
+  color:var(--color-text-muted);min-width:0}
+.mg-flag{font-family:var(--font-mono);color:var(--color-text-faint);margin-left:4px}
+.mg-chev{color:var(--color-text-faint);font-size:var(--text-lg);line-height:1}
+.mg-tier{font-size:var(--text-2xl);font-weight:600;line-height:1.1}
+.mg-tier-none{color:var(--color-text-faint)}
+
+/* Reused by the detail header, so it stays a bare bar with no card chrome.
+   flex:none matters: inside the card this is a COLUMN flex child, and flex:1
+   there resolves flex-basis to 0 and collapses the bar to zero height. It only
+   needs to grow in the detail header, which is a row — scoped below. */
+.mg-bar{display:block;height:5px;border-radius:3px;background:var(--color-border);
+  overflow:hidden;flex:none;width:100%;min-width:0}
+.gd-prog .mg-bar{flex:1 1 auto;width:auto}
+.mg-bar-fill{display:block;height:100%;background:var(--color-primary);border-radius:3px}
+.mg-next{font-size:var(--text-xs);color:var(--color-text);min-width:0;
+  overflow-wrap:anywhere}
+.mg-meta{font-size:var(--text-xs);color:var(--color-text-faint);min-width:0}
+
+/* ── PROGRESS: coverage strip ──────────────────────────────────────────── */
+.coverage{border:1px solid var(--color-border);border-radius:var(--radius);
+  margin-bottom:var(--space-4);background:var(--color-surface)}
+.cov-head{display:flex;align-items:baseline;gap:var(--space-3);flex-wrap:wrap;
+  padding:var(--space-3) var(--space-4);cursor:pointer;list-style:none}
+.cov-head::-webkit-details-marker{display:none}
+.cov-label{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:.08em;
+  color:var(--color-text-muted)}
+.cov-count{font-family:var(--font-mono);font-size:var(--text-sm);font-weight:600}
+.cov-sub{font-size:var(--text-xs);color:var(--color-text-faint);min-width:0}
+.cov-body{padding:0 var(--space-4) var(--space-3)}
+.cov-row{display:flex;align-items:baseline;gap:var(--space-3);padding:4px 0;
+  border-top:1px solid var(--color-border);font-size:var(--text-xs);flex-wrap:wrap}
+.cov-pat{flex:1 1 40%;min-width:0;color:var(--color-text-muted)}
+.cov-val{font-family:var(--font-mono);flex:0 0 auto}
+.cov-via{color:var(--color-text-faint);flex:1 1 100%;min-width:0}
+@media (min-width:560px){ .cov-via{flex:0 1 auto;text-align:right} }
+.cov-row-empty{opacity:.6}
+.cov-note{font-size:var(--text-xs);color:var(--color-text-muted);margin:var(--space-2) 0 0}
+
+/* ── PROGRESS: link through to the log ─────────────────────────────────── */
+.history-link{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);
+  width:100%;padding:var(--space-3) var(--space-4);margin-top:var(--space-4);
+  border:1px solid var(--color-border);border-radius:var(--radius);
+  background:var(--color-surface);font:inherit;color:var(--color-text);
+  cursor:pointer;text-align:left}
+.history-link:hover{border-color:var(--color-primary)}
+.hl-meta{font-size:var(--text-xs);color:var(--color-text-faint);flex:0 0 auto}
+.back-link{display:inline-block;padding:var(--space-2) 0;margin-bottom:var(--space-2);
+  background:none;border:none;font:inherit;font-size:var(--text-sm);
+  color:var(--color-primary);cursor:pointer}
+
+/* ── PROGRESS: group detail ────────────────────────────────────────────── */
+.gd-head{margin-bottom:var(--space-4)}
 .gd-title{display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap;min-width:0}
-.gd-group{font-size:var(--text-lg);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
-.gd-cap{font-size:var(--text-xs);color:var(--color-orange)}
-.gd-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));
-  gap:var(--space-3)}
-.gd-cards>*{min-width:0}
-@media (max-width:480px){ .gd-cards{grid-template-columns:1fr} }
+.gd-group{font-size:var(--text-xl);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.gd-prog{display:flex;align-items:center;gap:var(--space-3);margin-top:var(--space-3)}
+.gdp-from,.gdp-to{font-size:var(--text-xs);color:var(--color-text-faint);flex:0 0 auto}
+.gd-block{border:1px solid var(--color-border);border-radius:var(--radius);
+  padding:var(--space-4);margin-bottom:var(--space-3);background:var(--color-surface)}
+.gd-milestone{border-color:var(--color-primary)}
+.gd-h3{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:.08em;
+  color:var(--color-text-muted);margin:0 0 var(--space-2)}
+.gd-sub{font-size:var(--text-xs);color:var(--color-text-faint);margin:0 0 var(--space-3)}
+.ms-line{font-size:var(--text-lg);font-weight:600;margin:0}
+.ms-sub{font-size:var(--text-xs);color:var(--color-text-muted);margin:var(--space-2) 0 0}
+
+.ex-table,.act-table{display:flex;flex-direction:column}
+.ex-row{display:grid;grid-template-columns:1fr auto;gap:4px var(--space-3);
+  align-items:center;padding:var(--space-2) 0;border-top:1px solid var(--color-border)}
+.ex-row:first-child{border-top:none}
+.exr-name{font-size:var(--text-sm);min-width:0;overflow-wrap:anywhere}
+.exr-var{display:block;font-size:var(--text-xs);color:var(--color-text-faint)}
+.exr-rank{justify-self:end}
+.exr-val{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-muted)}
+.exr-bar{grid-column:1/-1;height:3px;border-radius:2px;background:var(--color-border);overflow:hidden}
+.exr-bar-fill{display:block;height:100%;background:var(--color-primary)}
+.exr-pending{grid-column:1/-1;font-size:var(--text-xs);color:var(--color-text-faint);font-style:italic}
+@media (min-width:560px){
+  .ex-row{grid-template-columns:1fr auto auto;align-items:baseline}
+  .exr-val{justify-self:end;min-width:5.5em;text-align:right}
+  .exr-bar{grid-column:1/-1}
+}
+
+.prog-card{display:flex;flex-direction:column;gap:var(--space-2)}
+.prog-meta{display:flex;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap}
+.prog-name{font-size:var(--text-sm)}
+.prog-delta{font-family:var(--font-mono);font-size:var(--text-sm);color:var(--color-primary)}
+
+.act-row{display:grid;grid-template-columns:auto 1fr auto;gap:var(--space-3);
+  align-items:baseline;padding:var(--space-2) 0;border-top:1px solid var(--color-border);
+  font-size:var(--text-xs)}
+.act-row:first-child{border-top:none}
+.act-date{color:var(--color-text-faint);flex:0 0 auto}
+.act-name{min-width:0;overflow-wrap:anywhere}
+.act-set{font-family:var(--font-mono);justify-self:end}

@@ -154,18 +154,13 @@
         <h2 class="section-heading">Progress</h2>
         <div id="streak-area"></div>
       </div>
-      <div id="rank-area"></div>
-      <div id="weight-trend-section"></div>
-      <div class="progress-grid" id="progress-grid"></div>
 
-      <!-- History is review, same as everything else on this tab. It keeps its
-           edit/delete controls, so Progress is no longer strictly read-only. -->
-      <div class="panel-header history-head">
-        <h2 class="section-heading">Past Workouts</h2>
-        <button class="btn btn-ghost btn-sm" onclick="clearAllHistory()">Clear all</button>
-      </div>
-      <div id="weight-log-list"></div>
-      <div class="history-list" id="history-list"></div>
+      <!-- Three views, one panel: the six groups, one group's detail, and the
+           log. Past workouts used to sit inline below everything, which pushed
+           the six cards into a minority of the scroll. -->
+      <div id="progress-main"></div>
+      <div id="progress-detail" hidden></div>
+      <div id="progress-history" hidden></div>
     </section>
 
     <!-- SETTINGS -->

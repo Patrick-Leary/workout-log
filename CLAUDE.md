@@ -159,6 +159,30 @@ Logged set -> Epley e1RM -> population percentile -> tier + division.
 - **UI**: `preview_start` on the `workout-log` launch config (port 4174), then drive the real
   functions from the console rather than asserting on the DOM alone.
 
+## Progress page
+Three views in one panel (`progressView`: `main` / `group` / `history`), switched by
+`showProgressView()`. Six muscle-group cards are the page; coverage is one collapsible line;
+history is a click away. It used to sit inline under everything, which pushed the cards — the
+actual point — into a minority of the scroll.
+- **Milestones run the rank engine backwards** (`valueForPercentile`): given a tier, what lift and
+  weight reaches it. Inverted by **binary search on `percentileFor`**, not a closed-form inverse
+  normal CDF — 40 iterations beat any precision the UI shows, and reusing the forward function
+  means the two can never disagree. A separate inverse would be a second copy of the same curve,
+  free to drift.
+- `groupMilestone` picks the lift needing the smallest **relative** gain, not the heaviest one.
+  Weight-only selection told this log to take dumbbell rows 15 → 35 lb (2.3x) when 10 lb on the
+  pulldown did the same work.
+- It returns three kinds, and **which kind matters more than the number**: `capped` (no lift moves
+  this — the ceiling is the constraint), `establish` (a lift is one session short of counting), and
+  `lift` (train this, to this). Prescribing a lift for a capped group would be a lie: you could hit
+  the number and the tile would not move.
+- `groupRank` exposes `capIndex` and `ceilingReason`. The milestone tests **`nextIndex > capIndex`**,
+  not the `capped` flag — a group sitting exactly at its ceiling is not flagged capped yet no lift
+  moves it either.
+- ⚠️ `.mg-bar` must stay `flex:none`. Inside a card it is a COLUMN flex child, where `flex:1`
+  resolves flex-basis to 0 and collapses the bar to zero height. It only grows in `.gd-prog`.
+- ⚠️ **Divisions run 3 → 1, bottom to top** (game-ladder convention). "Silver 1 → Gold" is correct.
+
 ## Auth
 The shared secret lives in **Script Properties** (`SHARED_SECRET`), never in `appsscript.js`.
 ⚠️ **This repo is public.** The original design hardcoded `const SECRET = "..."` in the tracked
