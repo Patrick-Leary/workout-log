@@ -104,10 +104,19 @@ Logged set -> Epley e1RM -> population percentile -> tier + division.
   anchors don't line up with the tier bands (10/25/40/60/80).
 - **Epley above ~12 reps is unreliable** — Epley and Brzycki differ by ~27% on a 20-rep set. Those
   e1RMs are flagged `conf: low` in the UI rather than silently trusted.
-- **Decay is a house rule, not physiology.** The literature has strength holding 2-4 weeks and only
-  dropping meaningfully past ~4. `DECAY` slips a division per 5 days after a 7-day grace, floored
-  at one tier, purely for motivation — and training the group replaces the estimate with a real
-  measurement immediately. The UI must keep saying it's an upkeep rule.
+- ⚠️ **Rank decay was REMOVED 2026-09-07 — do not reintroduce it.** It slipped a division per
+  5 days after a 7-day grace. Two problems. It was unphysiological (strength holds 2-4 weeks), and
+  far worse, **`calcStreak` also zeroed at exactly 7 days**: a missed week demoted every muscle
+  group *and* wiped the streak on the same morning — the app's entire response to a lapse was to
+  punish it twice, at the moment of maximum quit risk, to a user whose previous attempt died at
+  day 41. Replaced with the chess-rating treatment (`STALE`): the rank HOLDS and confidence in it
+  ages — "last measured 9d ago", "unmeasured" past 21 days. Glicko does not lower an inactive
+  player's rating, it widens their deviation, and this app already had that vocabulary
+  (`provisional`, `conf: low`) everywhere except here.
+- **`STREAK` forgives one gap.** A single break of 7-13 days keeps the streak alive and is shown as
+  "·1 skip"; a second gap, or one past a fortnight, ends it. Apple pauses a ring streak for a
+  month; Duolingo sells a Streak Freeze. A hard cliff punishes exactly the person you most need
+  back.
 - **Epley returns `w` at exactly 1 rep.** Plain Epley gives `w * 31/30` there, inflating a true
   1RM by 3.3% and making the most accurate input the app can take one of its least accurate
   outputs.

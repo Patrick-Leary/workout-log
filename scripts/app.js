@@ -196,7 +196,27 @@ const TIERS = [
 // strength holds for 2-4 weeks and only drops meaningfully past ~4. This is a
 // deliberate house rule for motivation, labelled as one in the UI. Training the
 // group replaces the estimate with a real measurement and restores it at once.
-const DECAY = { graceDays: 7, daysPerDivision: 5, maxTiersLost: 1 };
+/* ── STALENESS, not decay ─────────────────────────────────────────────────
+   This used to demote a division per 5 days after a 7-day grace. It was always
+   documented as a house rule rather than physiology — the literature has
+   strength holding 2-4 weeks — and it had a worse problem than being wrong:
+   `calcStreak` ALSO zeroed at exactly 7 days. A missed week triggered both at
+   once, so the app's entire response to a lapse was to demote you and wipe your
+   streak on the same morning. That is the moment of maximum quit risk, and the
+   owner's previous attempt died at day 41.
+
+   The fix is the chess-rating one. Glicko does not lower an inactive player's
+   rating; it widens their rating deviation — the number holds, the confidence
+   in it drops. This app already has that vocabulary (`provisional`,
+   `conf: low`) and used it everywhere except here. So: the rank holds, and we
+   say how long since it was last measured.                                   */
+const STALE = { afterDays: 7, provisionalDays: 21 };
+
+// One forgiveness. A single gap of a week or two keeps the streak alive; a
+// second one, or a gap past a fortnight, ends it. Apple lets you pause a ring
+// streak for a month and Duolingo sells a Streak Freeze — a hard cliff at day 7
+// punishes exactly the person you most need to come back.
+const STREAK = { freeDays: 7, forgivenDays: 14 };
 
 /* ── BREADTH ──────────────────────────────────────────────────────────────
    Caps, not deductions. Three numbers instead of one blended score:
@@ -633,6 +653,18 @@ function addExerciseToLog(exId, prefilledSets = null, prefilledVariant = null) {
   const prevText  = best
     ? (ex.weighted ? `Last: ${best.weight ?? "–"}lb × ${best.reps}` : `Last: ${best.reps} reps`)
     : "First session";
+
+  /* The target, at the point of action. The milestone engine already knows the
+     next division and what reaches it, but it only ever appeared on Progress —
+     a page reviewed on a laptop, not in the gym. A specific, graded next target
+     shown while you are deciding what to load is the whole point of having
+     computed it. */
+  const em   = exerciseMilestone(ex.id);
+  const goal = em && em.kind === "lift"
+    ? (em.unit === "reps"
+        ? `Target: ${em.reps} reps → ${em.tier} ${em.division}`
+        : `Target: ${fmtNum(em.weight)} ${isPerHand(ex, variant) ? "lb/hand" : "lb"} × ${em.reps} → ${em.tier} ${em.division}`)
+    : "";
   const variantSel = !ex.lockedVariant && ex.variants && ex.variants.length > 1
     ? `<select class="select-input variant-select" id="variant-${ex.id}"
                aria-label="${ex.name} variant" onchange="onVariantChange('${ex.id}')">
@@ -649,6 +681,7 @@ function addExerciseToLog(exId, prefilledSets = null, prefilledVariant = null) {
       <div class="exercise-title">
         <div class="exercise-name">${ex.name}</div>
         ${exerciseHint(ex, variant) ? `<div class="exercise-hint">${exerciseHint(ex, variant)}</div>` : ""}
+        ${goal ? `<div class="exercise-goal ${em ? tierClass(em.tier) : ""}">${esc(goal)}</div>` : ""}
         ${variantSel}
       </div>
       <div style="display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap;justify-content:flex-end">
@@ -1556,7 +1589,7 @@ function rankForExercise(exId, asOf) {
   const peak = tierFromPct(pct);
   if (!peak) return { ...base, ranked: false, reason: "unrankable" };
 
-  const { rung, lost } = applyDecay(peak.rung, daysSince);
+  const { rung, lost, stale, unmeasured } = applyDecay(peak.rung, daysSince);
 
   // Other variants stay visible, so a stronger-but-stale variant does not
   // silently vanish when the training style changes.
@@ -1569,20 +1602,18 @@ function rankForExercise(exId, asOf) {
                ...(p != null ? tierFromPct(p) : {}), pct: p };
     });
 
-  return { ...base, ranked: true, pct, peak, lost, others,
+  return { ...base, ranked: true, pct, peak, lost, stale, unmeasured, others,
            value: best.value, reps: best.reps, bestDate: best.date,
            confidence: e1rmConfidence(best.reps), unit: std.kind,
            ...rungToTier(rung) };
 }
 
-// Upkeep decay. Deliberately a house rule, not physiology — see DECAY.
+// Kept for the call sites; see STALE for why it no longer demotes.
+// The rank is preserved; only our confidence in it ages.
 function applyDecay(rung, daysSince) {
-  if (rung == null || daysSince == null || daysSince <= DECAY.graceDays) {
-    return { rung, lost: 0 };
-  }
-  const divisions = Math.floor((daysSince - DECAY.graceDays) / DECAY.daysPerDivision);
-  const lost = Math.min(divisions / 3, DECAY.maxTiersLost);
-  return { rung: Math.max(0, rung - lost), lost };
+  const d = daysSince == null ? 0 : daysSince;
+  return { rung, lost: 0, stale: d > STALE.afterDays,
+           unmeasured: d > STALE.provisionalDays, daysSince: d };
 }
 
 function allRanks(asOf) {
@@ -1863,7 +1894,7 @@ function groupRank(group, asOf) {
            // Only lifts actually HELD BACK — an unestablished lift that already
            // counts (because it raised the group) is not pending anything.
            pending: all.length - rs.length,
-           decayed: rs.some(r => r.lost > 0),
+           stale: rs.some(r => r.stale), unmeasured: rs.every(r => r.unmeasured),
            // Carried up from the cards: a tile reading "Platinum 3" off a
            // 20-rep Epley estimate is the least trustworthy number on the page
            // and must not look like the most confident one.
@@ -1887,16 +1918,24 @@ function daysBetween(isoA, isoB) {
 
 // Each workout session adds 1. Resets only if 7+ days pass with no workout.
 function calcStreak() {
-  const days = workouts.map(w => w.date).sort((a, b) => b.localeCompare(a));
-  if (!days.length) return 0;
-  if (daysBetween(days[0], todayISO()) >= 7) return 0;
+  const days = [...new Set(workouts.map(w => w.date))].sort((a, b) => b.localeCompare(a));
+  if (!days.length) return { count: 0, forgiven: false };
 
-  let streak = 1;
+  let forgiven = false;
+  // A gap ends the streak unless it is the FIRST gap and under a fortnight.
+  const bridge = gap => {
+    if (gap < STREAK.freeDays) return true;
+    if (!forgiven && gap < STREAK.forgivenDays) { forgiven = true; return true; }
+    return false;
+  };
+
+  if (!bridge(daysBetween(days[0], todayISO()))) return { count: 0, forgiven: false };
+  let count = 1;
   for (let i = 0; i < days.length - 1; i++) {
-    if (daysBetween(days[i + 1], days[i]) >= 7) break;
-    streak++;
+    if (!bridge(daysBetween(days[i + 1], days[i]))) break;
+    count++;
   }
-  return streak;
+  return { count, forgiven };
 }
 
 function tierClass(tier) { return "tier-" + String(tier || "").toLowerCase(); }
@@ -2015,10 +2054,11 @@ function renderProgress() {
 
   const streakArea = document.getElementById("streak-area");
   if (streakArea) {
-    const streak = calcStreak();
-    streakArea.innerHTML = streak > 0
-      ? `<div class="streak-badge">🔥 ${streak}-session streak</div>`
-      : `<div class="streak-badge streak-none">No active streak — keep going!</div>`;
+    const st = calcStreak();
+    streakArea.innerHTML = st.count > 0
+      ? `<div class="streak-badge">🔥 ${st.count}-session streak${st.forgiven
+          ? `<span class="streak-forgiven" title="A gap was bridged — the streak survives one break">·1 skip</span>` : ""}</div>`
+      : `<div class="streak-badge streak-none">Log a session to start a streak</div>`;
   }
 
   if (progressView === "group") { detail.innerHTML = groupDetailHtml(openGroup); return; }
@@ -2071,7 +2111,8 @@ function renderGroupCards() {
       gr.thin ? "1 lift" : `${gr.count} lifts`,
       gr.pending ? `${gr.pending} not counted yet` : "",
       gr.provisional ? "provisional" : "",
-      gr.decayed ? "slipping — untrained" : "",
+      gr.unmeasured ? `unmeasured ${gr.daysSince}d`
+        : gr.stale ? `last measured ${gr.daysSince}d ago` : "",
     ].filter(Boolean).join(" · ");
 
     const nextTier = m && m.kind === "lift" ? `${m.tier} ${m.division}` : null;
@@ -2313,7 +2354,8 @@ function groupDetailHtml(group) {
           <p class="scoring-note">Percentiles are against <strong>people who log lifts on Strength
             Level</strong> — a committed population, well above average. Thresholds scale with
             bodyweight, so this measures strength <em>per pound</em>. Untrained groups slip after
-            ${DECAY.graceDays} days as an upkeep rule, not a claim that you got weaker.</p>
+            ${STALE.afterDays} days are marked as unmeasured — the rank is held, not lowered,
+            because not training is not the same as getting weaker.</p>
         </div>
       </details>
     </div>

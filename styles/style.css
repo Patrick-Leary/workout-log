@@ -920,3 +920,8 @@ a,button,[role="button"],input,select{
   .act-row{grid-template-columns:auto 1fr auto}
   .act-rank{grid-column:2/-1;justify-self:start}
 }
+
+/* The next target, shown while you are deciding what to load. */
+.exercise-goal{font-size:var(--text-xs);color:var(--tier,var(--color-primary));
+  margin-top:2px;overflow-wrap:anywhere}
+.streak-forgiven{margin-left:var(--space-2);font-size:var(--text-xs);opacity:.75}
