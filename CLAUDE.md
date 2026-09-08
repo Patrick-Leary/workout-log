@@ -364,3 +364,31 @@ A code critique found 12 live defects in the milestone/chart work. The ones that
   ladder a second time on every call (269 `allRanks` calls for one detail render on a large log).
 - 📌 Still open: `stamp.sh` cache-busts the assets but not `index.html` itself, so a stale HTML
   still yields a stale script for one cache lifetime. A pre-commit hook would close it.
+
+## Exercise catalogue — two bugs fixed 2026-09-07
+
+Found by auditing whether five planned exercises existed, not by a test failing.
+
+### `perHand` must be set wherever the mapped standard is per-dumbbell
+`ohpress` carried `std.Dumbbell = "ohp-db"` — a **per-dumbbell** curve (50 lb median vs 98 for
+`ohp-bb`) — with **no `perHand` field**. `isPerHand()` is purely a labelling flag; the ranking always
+compares the entered number straight to the standard. So the form showed a plain `lbs` box with no
+per-dumbbell hint, a user would reasonably enter the TOTAL, and the engine would rank it as one hand:
+**the identical 2× inflation that put Legs at Platinum off a 30 lb split squat.**
+
+⚠️ **Invariant to hold: for every `(exercise, variant)` whose `std` maps to a `*-db` curve,
+`perHand` must include that variant.** Worth a test rather than an audit.
+
+The one existing `ohpress` row (2026-05-16, 40×8) has a blank variant → resolves to `variants[0]`
+= Barbell → not per-hand, so the fix is not retroactive.
+
+### An unmeasurable variant gets logged but not ranked
+`dips` had only Bodyweight and Weighted, so an **assisted** dip had no honest home — logging it as
+Bodyweight credits ~127 lb the user did not lift. Added **Assisted**, deliberately absent from `std`.
+
+This is now the third instance of the same principle (Captain's-chair leg raise, bodyweight split
+squat, assisted dip): **when the movement removes an unknown share of the load, log it and leave it
+unranked.** Inventing a curve is worse than an empty rank.
+
+### Note
+`chestpress` is `legacy` — the gym has no chest press machine (2026-09-05). Don't recommend it.

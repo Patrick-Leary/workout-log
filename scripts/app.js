@@ -54,7 +54,11 @@ const EXERCISES = [
   { id: "dips",        name: "Dips",              group: "Chest",     defaultSets: 3, repRange: null,     weighted: false, weight: 1.0, amrap: true,
     // Only the bodyweight variant carries standards; a weighted dip is a
     // different lift and Strength Level ranks it on added load, not reps.
-    variants: ["Bodyweight", "Weighted"], std: { Bodyweight: "dips" } },
+    // Assisted stays deliberately unranked for the same reason Captain's-chair
+    // leg raises and bodyweight split squats do: the machine removes an unknown
+    // share of bodyweight, so there is no honest curve to rank the reps against.
+    // Logging it keeps the session history intact without inventing a number.
+    variants: ["Bodyweight", "Weighted", "Assisted"], std: { Bodyweight: "dips" } },
 
   // ── Back ────────────────────────────────────────────────────────────────
   { id: "pullups",     name: "Pull-Ups",          group: "Back",      defaultSets: 3, repRange: null,     weighted: false, weight: 1.0, amrap: true,
@@ -90,6 +94,11 @@ const EXERCISES = [
 
   // ── Shoulders ───────────────────────────────────────────────────────────
   { id: "ohpress",     name: "Overhead Press",    group: "Shoulders", defaultSets: 3, repRange: [5, 10],  weighted: true,  weight: 1.0,
+    // Barbell is total bar weight; the dumbbell version is per hand. `ohp-db`
+    // is a per-dumbbell curve (50 lb at the median vs 98 for the barbell), so
+    // without this flag the form invited a TOTAL and ranked it as one hand —
+    // the same 2x inflation that put Legs at Platinum off a 30 lb split squat.
+    perHand: ["Dumbbell"],
     variants: ["Barbell", "Dumbbell"], std: { Barbell: "ohp-bb", Dumbbell: "ohp-db" } },
   { id: "latraise",    name: "Lateral Raise",     group: "Shoulders", defaultSets: 3, repRange: [10, 12], weighted: true,  weight: 0.5,
     perHand: ["Dumbbell seated", "Dumbbell standing"],
