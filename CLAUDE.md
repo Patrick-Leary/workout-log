@@ -245,6 +245,44 @@ common "it's broken" cause, closely followed by sync settings being per-browser.
 - No way to delete a *workout* date's food from the app except by emptying it and saving.
 - Service worker for true offline use.
 
+### From the 2026-09-07 competitive analysis (Strong/Hevy/Boostcamp/JEFIT/Fitbod/Liftin/Zwift)
+Ranked by evidence, not by novelty. The framing that drives the order: the largest published cohort
+on lifting-app adherence (Fitbod, n≈389k) finds **distinct workout days in the first 28 days** is the
+strongest predictor of 12-month retention. This app is a precision instrument for measuring lift
+*quality*, aimed at a problem that is about *quantity of sessions*.
+1. **Session templates / "today's plan"** — named routines (A/B/C) that pre-fill the Today form.
+   Every competitor treats "what am I doing today" as the core job; this app starts every session as
+   a blank form, so every session requires deciding what to do while standing in the gym. Also makes
+   the movement-pattern breadth cap self-satisfying. **A `ll_routines` localStorage key, a picker and
+   a prefill — no sheet change. One evening, and the highest-value item on this list.**
+2. **Rest timer** — the only item here with direct physiological evidence (Schoenfeld 2016; 2024
+   Bayesian meta-analysis) and it is an *in-gym* feature. Every competitor has one. An evening,
+   pure client-side. Needs a Wake Lock or the screen sleeps.
+3. **Weekly sets per muscle group** — six bars, direct 1.0 / indirect 0.5, against a 10–20 band,
+   current week greyed out (a Tuesday reading against a weekly band is a false alarm — same
+   reasoning as blank≠zero). This is the *continuous* version of the breadth cap already shipped.
+   A weekend, mostly the exercise→muscle mapping. **Do not compute personal MEV/MRV** — that would
+   be inventing a standard from 8 days of data.
+4. **First-time / breadth rewards** — Zwift's largest XP source is one-time route completion, and the
+   Fitbod cohort found equipment diversity predicts lower dropout. Turns the punitive breadth cap
+   into a positive. Unproven transfer; an evening.
+
+**Deliberately NOT to build** (each is standard elsewhere and wrong here):
+- **Plate calculator** — Smith machine, dumbbells, cables, leg press. He almost never loads a barbell.
+- **Social / kudos / leaderboards** — needs accounts and a backend; single user; and the Strava
+  literature is double-edged (kudos raise volume, but also comparison pressure during setbacks).
+- **Recovery / readiness scores** — needs a wearable he lacks, or a daily subjective input tax on an
+  app whose problem is adherence.
+- **RPE/RIR per set** — novice accuracy is poor and it taxes the interaction that must stay fastest.
+- **Progress photos** — localStorage quota, and base64 does not belong in a Sheet.
+- **A large exercise library** — he needs ~15 movements in one small gym.
+- **A composite overall strength score** — removed 2026-09-07; DOTS-style scores are built on
+  squat/bench/deadlift, three barbell lifts he may never perform. Do not let it back.
+
+📌 **And stop investing in the 24-nutrient food schema.** At 127 lb lean bulking, calories and
+protein move the outcome; the other 22 columns are a data-entry chore on an app whose stated top
+risk is abandonment. Leave it (it self-migrates and costs nothing) but stop photographing labels.
+
 ## Progress page — traps found by review (2026-09-07)
 A design critique caught five shipped defects the author's own screenshots missed. Recorded because
 four of them are invisible in a screenshot and will recur:
