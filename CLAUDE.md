@@ -392,3 +392,91 @@ unranked.** Inventing a curve is worse than an empty rank.
 
 ### Note
 `chestpress` is `legacy` — the gym has no chest press machine (2026-09-05). Don't recommend it.
+
+## Food sync — seven bugs, and the contract that replaced the guesswork (2026-09-09)
+
+Reported as "it says synced but it isn't, especially if I update the food more than once a day."
+All seven were real. Two of them lost data **silently** and were not what he noticed.
+
+### The contract, stated plainly
+> **The sheet is the source of truth. localStorage is a write-ahead buffer whose only job is to
+> drain into it.** Local wins for exactly one thing — a date with edits not yet accepted — and that
+> exception must ALWAYS have a way to resolve.
+
+Every bug below is a place the code departed from that sentence.
+
+### 1–5: the visible failures
+1. **`baseSavedAt()` went stale after every successful save.** Local food rows only ever received a
+   `savedAt` on the way IN from a fetch; a successful save never stamped them. So the second save of
+   a day sent a base from the last *fetch* while the server had advanced to the *first save's* stamp,
+   and the server correctly rejected it. **The "other device" was this device, one save ago.**
+   Workouts never hit this: a workout entry is stored whole with its `savedAt`; food rows are
+   item-level and had nowhere to keep one.
+2. **`saveFoodDay()` did not await the sync** and reported `Saved ✓` before the request finished —
+   and kept the toast up when the write came back rejected.
+3. **`fetchFromSheets()` reported a clean "Synced" while deliberately skipping dirty dates.** The
+   status described the HTTP call, not the data on screen. This is the literal "says synced but isn't".
+4. **The conflict toast promised "pulling the newer version" and did not** — the pull skips dirty
+   dates, which is always the date that just conflicted.
+5. **The wedge.** Because the fetch skips dirty dates, the stale base that caused a conflict could
+   never be refreshed, so every retry recomputed the same base and failed identically. **No exit
+   short of clearing site data.** On conflict the client now adopts the server's `savedAt`, making
+   the next save a deliberate overwrite — the user has been told, and has to press Save again.
+
+### 6–7: the silent ones (found by reviewing the whole path, not by the report)
+6. ⚠️ **An undefined `_base` bypassed the conflict guard outright.** The client *inferred* "never
+   synced this date" from "no local row carries a savedAt" — which is **also true when the date was
+   fetched while EMPTY and gained rows afterwards.** That is exactly what happens when Claude writes
+   to a day the phone has open. The phone's next save then replaced those rows with no conflict and
+   no warning.
+   **Fix, and note it took two attempts:** a recorded per-date baseline (`ll_synced_at`) makes `""`
+   mean "the server genuinely had nothing", distinct from "never heard of this date". That alone did
+   NOT close it — a date with no local rows and no server rows never enters the map. The fetch now
+   also sends an explicit `since` and records it (`ll_synced_from`), so **absence inside a known
+   window is information; absence inside an unknown window is just ignorance.**
+7. **`retryQueue()` replayed the payload frozen at failure time.** Edits made after a failed save
+   were overwritten by the stale snapshot, which then succeeded and cleared the dirty flag — sheet
+   missing items, app reporting saved, and the flag that would have caught it gone. The queue now
+   holds **dates**; `buildFoodEntry(date)` rebuilds from live state at retry.
+
+### Escape hatch
+**"Discard & reload"** next to the Unsaved indicator. The dirty shield that stops a background fetch
+from wiping an in-progress meal is the same thing that stops a bad local copy from ever being
+replaced — so dropping it has to be possible, deliberately, for one date, behind a confirm.
+
+### Decision: NOT item-level upsert (revisit only if the merge problem becomes real)
+Saving replaces the whole day, so two writers to one date clobber by construction. The **Foods** tab
+already does the right thing (upsert by `Key`); Nutrition cannot, because item ids are ephemeral —
+never sent in the payload, no `Id` column, regenerated on every fetch.
+
+The principled fix is an `Id` column + upsert by id + tombstones for deletions. **Deliberately not
+built.** It buys concurrent multi-writer merge; there is one phone, plus Claude occasionally, and
+that coordination is free (save first, then ask). Once bug 6 is closed the guard converts every
+concurrent case into a **visible conflict instead of silent loss**, which is the property that
+actually matters. Revisit if the conflict toast starts appearing for real reasons.
+
+### Tests — `tests/sync_test.js`, 23 cases
+```bash
+osascript -l JavaScript tests/sync_test.js   # from the repo root
+```
+Loads the real `scripts/app.js` against stubbed browser globals and a fake server mirroring
+`staleWrite()` from `appsscript.js`. **Every case began as a reproduction of a bug that shipped** —
+write baselines, conflict detection, conflict recovery, retry, the escape hatch. Three data-loss
+bugs passed human review in this one file; the tests are what separated "looks right" from "is right".
+
+**Decision: the suite is committed, and it is fine that this repo is public.** Fixtures are entirely
+synthetic (`A`, `B`, `SRV`, `phone item`) — no real foods, no endpoint, no secret. Note that **GitHub
+Pages serves the whole repo**, so `tests/` is publicly fetchable at the Pages URL; it is inert
+(`index.html` never references it, it only runs under osascript) and no worse than `appsscript.js`,
+which is the actual server code and has always been up there. The thing that must stay private is the
+**sheet** — behind the owner's Google account, reached by a deployment URL that lives only in the
+macOS keychain, gated by a secret in Script Properties. None of that is in the repo.
+
+⚠️ Resolve `app.js` from the working directory, never an absolute path — this repo syncs to a
+Windows PC and a hardcoded `/Users/...` fails there with a null read instead of an error.
+⚠️ `osascript` evaluates the file and then its trailing expression, so `run()` can execute twice in
+one process. It resets all shared state on entry so the second pass stays meaningful.
+
+### Standing habit for whoever writes to this sheet
+**Save the day in the app before asking Claude to add items.** The guard now makes the collision
+visible rather than silent, but a visible collision is still a collision.
