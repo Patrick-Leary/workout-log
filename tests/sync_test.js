@@ -1,6 +1,17 @@
 ObjC.import('Foundation');
 function slurp(p){ return ObjC.unwrap($.NSString.alloc.initWithContentsOfFileEncodingError(p,4,null)); }
-const SRC = slurp('/Users/patrickleary/claude/projects/workout-log/scripts/app.js');
+
+// Resolved from the working directory, not hardcoded. An absolute path with a
+// username in it works on exactly one machine and silently rots everywhere
+// else — including the Windows half of this repo's sync and any fresh clone.
+const CWD = ObjC.unwrap($.NSFileManager.defaultManager.currentDirectoryPath);
+const APP = CWD + '/scripts/app.js';
+const SRC = slurp(APP);
+if (!SRC) {
+  console.log('Could not read ' + APP + '\nRun this from the repo root:\n' +
+              '  osascript -l JavaScript tests/sync_test.js');
+  throw new Error('app.js not found');
+}
 
 // ── stubs ────────────────────────────────────────────────────────────────
 const store = {};
