@@ -910,7 +910,23 @@ async function postToSheets(payload) {
     // conflicted. So the refresh below updates everything else — it does not
     // pull this day. Saying "pulling the newer version" was a promise the code
     // does not keep, and it sent the user looking for changes that never arrived.
-    showToast(`${json.message || "Changed elsewhere"} — your edits are still local and queued`, "error");
+    showToast(`${json.message || "Changed elsewhere"} — your edits are still local, save again to keep them`, "error");
+
+    // ⚠️ Without this the app can WEDGE, and did. fetchFromSheets() below keeps
+    // local rows for any date with unsaved edits — which is always the date that
+    // just conflicted — so the stale `_base` that caused the conflict is never
+    // refreshed. Every retry then computes the same stale base and fails the
+    // same way, forever, with no path out short of clearing site data.
+    // Adopting the server's stamp makes the NEXT save a deliberate overwrite:
+    // the user has been told what happened and has to press Save again, which
+    // is the point at which "my edits win" is a choice rather than an accident.
+    if (json.date && json.serverSavedAt) {
+      nutrition.forEach(n => { if (n.date === json.date) n.savedAt = json.serverSavedAt; });
+      const w = workouts.find(x => x.date === json.date);
+      if (w) w.savedAt = json.serverSavedAt;
+      persist();
+    }
+
     await fetchFromSheets();
     const err = new Error(json.message || "Conflict");
     err.conflict = true;
