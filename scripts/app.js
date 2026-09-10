@@ -905,7 +905,12 @@ async function postToSheets(payload) {
   // device. Pull the newer version down and tell the user, so they can see what
   // changed before deciding. Silently winning is the outcome worth avoiding.
   if (json.status === "conflict") {
-    showToast(`${json.message || "Changed elsewhere"} — pulling the newer version`, "error");
+    // Careful with the wording: fetchFromSheets() deliberately KEEPS local rows
+    // for any date with unsaved edits, which is exactly the date that just
+    // conflicted. So the refresh below updates everything else — it does not
+    // pull this day. Saying "pulling the newer version" was a promise the code
+    // does not keep, and it sent the user looking for changes that never arrived.
+    showToast(`${json.message || "Changed elsewhere"} — your edits are still local and queued`, "error");
     await fetchFromSheets();
     const err = new Error(json.message || "Conflict");
     err.conflict = true;
@@ -927,6 +932,7 @@ async function fetchFromSheets() {
   if (!sheetsUrl) return;
   setSyncStatus("pending", "Fetching…");
   let emptyWorkoutsGuarded = false;
+  let dirtyKept = 0;
   try {
     // POST, not GET: a GET can only carry the secret as a query parameter,
     // where it ends up in Google's request logs and this browser's history.
@@ -966,11 +972,17 @@ async function fetchFromSheets() {
         .map(it => ({ ...it, id: it.id || newFoodId() }));
       const keptLocal = nutrition.filter(it => dirty.has(it.date));
       nutrition = [...fromSheet, ...keptLocal];
+      // Those days were deliberately NOT refreshed. Reporting a plain "Synced"
+      // afterwards is the lie worth avoiding: the request succeeded, but the
+      // data on screen for these dates is local and may not match the sheet.
+      dirtyKept = [...dirty].filter(d => nutrition.some(n => n.date === d)).length;
     }
     persist();
     setSyncStatus(...(emptyWorkoutsGuarded
       ? ["error", "Sheet returned no workouts — kept local history"]
-      : ["ok", "Synced"]));
+      : dirtyKept
+        ? ["pending", `Synced — ${dirtyKept} day(s) with unsaved edits kept local`]
+        : ["ok", "Synced"]));
 
     // Refresh whichever data tab is currently visible
     const activePanel = document.querySelector(".tab-panel.active")?.id;
@@ -2727,18 +2739,33 @@ async function saveFoodDay() {
     showToast("Saved on this device — Sheets not connected");
     return;
   }
-  showToast(`Saved ${items.length} item(s) ✓`);
-  syncFoodToSheets(entry);
+  // Awaited on purpose. Firing this off and immediately reporting success told
+  // the user the day was saved while the request was still in flight — and kept
+  // saying it when the write came back rejected.
+  const ok = await syncFoodToSheets(entry);
+  if (ok) showToast(`Saved ${items.length} item(s) ✓`);
 }
 
 async function syncFoodToSheets(entry) {
-  if (!sheetsUrl) return;
+  if (!sheetsUrl) return false;
   setSyncStatus("pending", "Syncing…");
+  let ok = false;
   try {
     await postToSheets({ ...entry, _base: baseSavedAt("food", entry.date) });
+
+    // The server stamps every row of the day with `entry.savedAt`. Local rows
+    // must carry the same stamp or the NEXT save of this day computes `_base`
+    // from whatever the last FETCH left behind — an older value — and the
+    // server correctly rejects it as stale. That is a self-inflicted conflict:
+    // the "other device" is this device, one save ago. Workouts never hit it
+    // because a workout entry is stored whole, savedAt included; food rows are
+    // item-level and only ever got a stamp on the way IN from a fetch.
+    nutrition.forEach(n => { if (n.date === entry.date) n.savedAt = entry.savedAt; });
+
     setSyncStatus("ok", "Synced");
     foodQueue = foodQueue.filter(q => q.date !== entry.date);
     foodDirty = foodDirty.filter(d => d !== entry.date);  // Sheets has it now
+    ok = true;
   } catch (err) {
     console.error("Food sync failed:", err);
     setSyncStatus("error", "Sync failed — queued");
@@ -2748,6 +2775,7 @@ async function syncFoodToSheets(entry) {
   persist();
   updateQueueStatus();
   renderFoodTab();
+  return ok;
 }
 
 // ── FOOD: coverage + pace ─────────────────────────────────────────────────
