@@ -400,6 +400,19 @@ let currentFoodDate = "";
 let openGroup       = null;   // Progress: which group tile is drilled into
 let foodQuery      = "";
 let foodDirty      = [];   // dates with local edits not yet accepted by Sheets
+// What the SERVER held for a date the last time this device heard from it,
+// keyed by date -> savedAt (""  means "the server had nothing for that date").
+// This used to be inferred from the newest savedAt among local rows, which
+// silently conflated "never synced this date" with "synced it while it was
+// empty" — and the second case then wrote with no base at all, blowing away
+// rows another writer had added since. A recorded fact beats a guess.
+let syncedAt       = {};
+// The earliest date the last successful fetch actually covered. Inside this
+// window, "absent from syncedAt" is itself information — the server returned
+// nothing for that date, so its baseline is "" (known-empty) rather than
+// unknown. Without this, a date that was empty at fetch time and gained rows
+// afterwards wrote with no base at all and silently replaced them.
+let syncedFrom     = "";
 let lastFoodResults = [];  // what the picker is currently showing
 let weightLookback = null; // null = all time
 let weightGoal     = "gain";  // gain | maintain | lose — drives the trend colours
@@ -420,6 +433,8 @@ function loadFromStorage() {
     nutrition  = JSON.parse(localStorage.getItem("ll_nutrition")  || "[]");
     foodQueue  = JSON.parse(localStorage.getItem("ll_food_queue") || "[]");
     foodDirty  = JSON.parse(localStorage.getItem("ll_food_dirty") || "[]");
+    syncedAt   = JSON.parse(localStorage.getItem("ll_synced_at")   || "{}");
+    syncedFrom = localStorage.getItem("ll_synced_from")            || "";
     sheetsSecret = localStorage.getItem("ll_sheets_secret")       || "";
     weightGoal   = localStorage.getItem("ll_weight_goal")         || "gain";
   } catch (e) {
@@ -437,6 +452,8 @@ function persist() {
     localStorage.setItem("ll_nutrition",  JSON.stringify(nutrition));
     localStorage.setItem("ll_food_queue", JSON.stringify(foodQueue));
     localStorage.setItem("ll_food_dirty", JSON.stringify(foodDirty));
+    localStorage.setItem("ll_synced_at",  JSON.stringify(syncedAt));
+    localStorage.setItem("ll_synced_from", syncedFrom);
     localStorage.setItem("ll_sheets_secret", sheetsSecret);
     localStorage.setItem("ll_weight_goal", weightGoal);
   } catch (e) {
@@ -921,6 +938,7 @@ async function postToSheets(payload) {
     // the user has been told what happened and has to press Save again, which
     // is the point at which "my edits win" is a choice rather than an accident.
     if (json.date && json.serverSavedAt) {
+      syncedAt[json.date] = json.serverSavedAt;
       nutrition.forEach(n => { if (n.date === json.date) n.savedAt = json.serverSavedAt; });
       const w = workouts.find(x => x.date === json.date);
       if (w) w.savedAt = json.serverSavedAt;
@@ -940,6 +958,14 @@ async function postToSheets(payload) {
 // Undefined means "never synced this date", which the server treats as safe.
 function baseSavedAt(kind, date) {
   if (kind === "workout") return workouts.find(w => w.date === date)?.savedAt;
+  // The recorded baseline wins whenever we have one — including the empty
+  // string, which is a real answer ("the server had no rows for this date")
+  // and is what makes a date that has since GAINED rows conflict instead of
+  // being silently overwritten. Only a date this device has genuinely never
+  // heard about falls through to undefined, which the server treats as safe.
+  if (Object.prototype.hasOwnProperty.call(syncedAt, date)) return syncedAt[date];
+  // Covered by the last fetch but absent from it — the server had nothing.
+  if (syncedFrom && date >= syncedFrom) return "";
   const rows = nutrition.filter(n => n.date === date && n.savedAt);
   return rows.length ? rows.map(n => n.savedAt).sort().pop() : undefined;
 }
@@ -949,6 +975,7 @@ async function fetchFromSheets() {
   setSyncStatus("pending", "Fetching…");
   let emptyWorkoutsGuarded = false;
   let dirtyKept = 0;
+  const fetchSince = new Date(Date.now() - 180 * 864e5).toISOString().slice(0, 10);
   try {
     // POST, not GET: a GET can only carry the secret as a query parameter,
     // where it ends up in Google's request logs and this browser's history.
@@ -957,8 +984,11 @@ async function fetchFromSheets() {
     const res = await fetch(sheetsUrl, {
       method:  "POST",
       headers: { "Content-Type": "text/plain" },
-      body:    JSON.stringify(sheetsSecret ? { _type: "fetch", _key: sheetsSecret }
-                                           : { _type: "fetch" }),
+      // `since` is explicit so the client KNOWS which dates the answer covers.
+      // Relying on the server's default window left that boundary unknowable,
+      // and an unknown boundary means an unknown write baseline.
+      body:    JSON.stringify(sheetsSecret ? { _type: "fetch", since: fetchSince, _key: sheetsSecret }
+                                           : { _type: "fetch", since: fetchSince }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
@@ -987,6 +1017,20 @@ async function fetchFromSheets() {
         .filter(it => !dirty.has(it.date))
         .map(it => ({ ...it, id: it.id || newFoodId() }));
       const keptLocal = nutrition.filter(it => dirty.has(it.date));
+
+      // Record what the server holds for every date it just told us about —
+      // BEFORE the dirty filter, because a dirty date's rows are skipped for
+      // display but its baseline is exactly what the next save must write
+      // against. Any local date the server returned nothing for is recorded as
+      // "" — known-empty, not unknown.
+      json.nutrition.forEach(it => {
+        const s = String(it.savedAt || "");
+        if (s > (syncedAt[it.date] || "")) syncedAt[it.date] = s;
+      });
+      const returned = new Set(json.nutrition.map(it => it.date));
+      nutrition.forEach(it => { if (!returned.has(it.date)) syncedAt[it.date] = ""; });
+      syncedFrom = fetchSince;
+
       nutrition = [...fromSheet, ...keptLocal];
       // Those days were deliberately NOT refreshed. Reporting a plain "Synced"
       // afterwards is the lie worth avoiding: the request succeeded, but the
@@ -1055,7 +1099,8 @@ async function retryQueue() {
   if (!pending) { showToast("Queue is empty"); return; }
   showToast(`Retrying ${pending} item(s)…`);
   for (const entry of [...syncQueue])  await syncToSheets(entry);
-  for (const entry of [...foodQueue])  await syncFoodToSheets(entry);
+  // Rebuilt from current local state, never replayed from the queued copy.
+  for (const entry of [...foodQueue])  await syncFoodToSheets(buildFoodEntry(entry.date));
   updateQueueStatus();
 }
 
@@ -2730,6 +2775,41 @@ function removeFoodItem(id) {
 
 // ── FOOD: save + sync ─────────────────────────────────────────────────────
 
+// The payload for a date, built from CURRENT local state. Retry must rebuild
+// rather than replay: the queue used to hold a frozen snapshot, so a retry
+// after further edits wrote the stale version, succeeded, and cleared the dirty
+// flag — leaving the sheet missing the newer items while the app said saved.
+function buildFoodEntry(date) {
+  return {
+    _type:   "food",
+    date,
+    savedAt: new Date().toISOString(),
+    items:   foodItemsFor(date).map(it => {
+      const row = { meal: it.meal, key: it.key, name: it.name, qty: it.qty,
+                    source: it.source, conf: it.conf };
+      FOOD_MACROS.forEach(k => { row[k] = it[k] === undefined ? null : it[k]; });
+      return row;
+    }),
+  };
+}
+
+// The way out when a day is stuck. A dirty date is deliberately shielded from
+// fetches so an in-progress meal can't be wiped by a background refresh — but
+// that shield is also what stops a bad local copy from ever being replaced.
+// This drops the shield for one date, on purpose, with a confirm.
+async function discardLocalDay(date) {
+  const d = date || currentFoodDate;
+  if (!confirm(`Discard this device's unsaved changes for ${d} and reload it from the sheet?`)) return;
+  foodDirty = foodDirty.filter(x => x !== d);
+  foodQueue = foodQueue.filter(q => q.date !== d);
+  nutrition = nutrition.filter(n => n.date !== d);
+  delete syncedAt[d];
+  persist();
+  await fetchFromSheets();
+  renderFoodTab();
+  showToast(`Reloaded ${d} from the sheet`);
+}
+
 async function saveFoodDay() {
   const items = foodItemsFor(currentFoodDate);
   // An empty day is worth saving if it used to have items — that's how you
@@ -2739,17 +2819,7 @@ async function saveFoodDay() {
     return;
   }
 
-  const entry = {
-    _type:   "food",
-    date:    currentFoodDate,
-    savedAt: new Date().toISOString(),
-    items:   items.map(it => {
-      const row = { meal: it.meal, key: it.key, name: it.name, qty: it.qty,
-                    source: it.source, conf: it.conf };
-      FOOD_MACROS.forEach(k => { row[k] = it[k] === undefined ? null : it[k]; });
-      return row;
-    }),
-  };
+  const entry = buildFoodEntry(currentFoodDate);
 
   if (!sheetsUrl) {
     showToast("Saved on this device — Sheets not connected");
@@ -2777,6 +2847,7 @@ async function syncFoodToSheets(entry) {
     // because a workout entry is stored whole, savedAt included; food rows are
     // item-level and only ever got a stamp on the way IN from a fetch.
     nutrition.forEach(n => { if (n.date === entry.date) n.savedAt = entry.savedAt; });
+    syncedAt[entry.date] = entry.savedAt;
 
     setSyncStatus("ok", "Synced");
     foodQueue = foodQueue.filter(q => q.date !== entry.date);
@@ -2786,7 +2857,7 @@ async function syncFoodToSheets(entry) {
     console.error("Food sync failed:", err);
     setSyncStatus("error", "Sync failed — queued");
     foodQueue = foodQueue.filter(q => q.date !== entry.date);
-    foodQueue.push(entry);
+    foodQueue.push({ date: entry.date });
   }
   persist();
   updateQueueStatus();
@@ -3055,7 +3126,9 @@ function renderFoodTotals() {
 
   const remLabel = rem > 0 ? `${fmtNum(rem)} to go` : `${fmtNum(-rem)} over`;
   const unsaved  = foodDirty.includes(currentFoodDate)
-    ? `<span class="food-unsaved">Unsaved — press Save Day</span>` : "";
+    ? `<span class="food-unsaved">Unsaved — press Save Day</span>
+       <button class="btn btn-ghost btn-sm" onclick="discardLocalDay()"
+               title="Throw away this device's unsaved changes for this day and take the sheet's version">Discard &amp; reload</button>` : "";
 
   // Sodium gets a real bar against the plan's ~2,750 rather than a single
   // warning threshold: it is the one macro that has been consistently out of
