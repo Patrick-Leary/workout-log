@@ -190,16 +190,30 @@ function getWorkouts() {
     .sort(function (a, b) { return b.date.localeCompare(a.date); });
 }
 
-function getWeightLog() {
-  const ss    = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName("Weight");
-  if (!sheet) return [];
-  const lastRow = sheet.getLastRow();
-  if (lastRow <= 1) return [];
+/* ⚠️ BLANK IS NOT ZERO here either, and this tab feeds the rank engine.
+   The old reader did `Number(weight)` then `!isNaN(...)`, and Number("") is 0 —
+   so a row with a date and an empty weight SURVIVED the filter as weight: 0.
+   currentBodyweight() then hit `Number(0) || STD_REF_BW` and silently
+   substituted the 130 lb reference for a real 127.4, dropping every weighted
+   lift a division and flattening the weight chart's y-axis with a 0 lb point.
+   The user had a real weight and the app invented a different one.
 
-  return sheet.getRange(2, 1, lastRow - 1, 2).getValues()
-    .map(([date, weight]) => ({ date: formatDateCell(date), weight: Number(weight) }))
-    .filter(r => r.date && !isNaN(r.weight));
+   Also read by HEADER NAME now, like every other tab. This was the one place
+   still addressing columns positionally (`getRange(2, 1, n, 2)`), which quietly
+   broke CLAUDE.md's stated "reorder or insert columns freely" guarantee for the
+   single tab whose value scales all of Progress. */
+function getWeightLog() {
+  const t = readTable("Weight");
+  if (!t) return [];
+
+  return t.rows.map(function (row) {
+    const raw = cell(row, t.col, "Weight (lbs)");
+    const blank = raw === "" || raw === null || raw === undefined;
+    return { date: formatDateCell(cell(row, t.col, "Date")),
+             weight: blank ? null : Number(raw) };
+  }).filter(function (r) {
+    return r.date && r.weight !== null && !isNaN(r.weight) && r.weight > 0;
+  });
 }
 
 // The food database — the single source of truth for repeat items. The app

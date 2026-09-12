@@ -103,7 +103,17 @@ const EXERCISES = [
   { id: "latraise",    name: "Lateral Raise",     group: "Shoulders", defaultSets: 3, repRange: [10, 12], weighted: true,  weight: 0.5,
     perHand: ["Dumbbell seated", "Dumbbell standing"],
     variants: ["Dumbbell seated", "Dumbbell standing", "Cable"],
-    std: { "Dumbbell seated": "latraise-db", "Dumbbell standing": "latraise-db", Cable: "latraise-db" } },
+    /* ⚠️ Cable is deliberately absent from `std` — logged, not ranked (2026-09-12).
+       Patrick's cable version is a two-arm bar on one stack, so the number
+       entered is the load for BOTH arms, while `latraise-db` is a per-dumbbell
+       curve. Scoring the total against it inflated by 2.25 rungs (Gold 2 →
+       Diamond 1 at 15 lb/hand × 12) — the same failure as the 30 lb split squat,
+       and it also printed "18 lb/hand" for one variant and "18 lb" for another
+       off the same curve. Strength Level publishes no two-arm lateral raise, so
+       there is nothing honest to map it to. Fourth instance of the standing
+       rule: when the entered number is not what the curve measures, log it and
+       leave it unranked rather than invent a standard. */
+    std: { "Dumbbell seated": "latraise-db", "Dumbbell standing": "latraise-db" } },
 
   // ── Arms ────────────────────────────────────────────────────────────────
   { id: "curls",       name: "Bicep Curls",       group: "Arms",      defaultSets: 3, repRange: [10, 15], weighted: true,  weight: 0.5, perHand: ["Dumbbell"],
@@ -1005,7 +1015,16 @@ async function fetchFromSheets() {
         emptyWorkoutsGuarded = true;
       }
     }
-    if (Array.isArray(json.weightLog)) weightLog = json.weightLog;
+    /* Sorted on arrival. saveWeight() and the JSON import both sort; this path
+       did not, and getWeightLog returns sheet ROW order — so a back-filled date
+       lands last. currentBodyweight sorts its own pool and the chart sorts too,
+       but the trend stat reads filtered[0] and filtered[len-1] positionally: a
+       real +1.56 lb/wk "fast — likely not all tissue" warning rendered as
+       "too early to read" with the gain understated by 80%. */
+    if (Array.isArray(json.weightLog)) {
+      weightLog = json.weightLog.slice()
+        .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    }
     if (Array.isArray(json.foods))     foods     = json.foods;
     // Sheet rows carry no id, but the quantity and remove controls address
     // items by id — without one they render fine and then refuse to be edited.
@@ -1237,6 +1256,32 @@ async function saveWeight() {
   const val  = parseFloat(document.getElementById("weight-input").value);
   if (!date)           { showToast("Select a date"); return; }
   if (isNaN(val) || val <= 0) { showToast("Enter a valid weight"); return; }
+
+  /* ⚠️ Bodyweight is the single input every weighted rank divides by, via
+     (bw/130)^0.67. A wrong one moves EVERY rank in the app and nothing on the
+     Progress page shows which bodyweight was used, so the error is invisible
+     where it does its damage. The markup's min/max are decorative here — this
+     control is a plain button, not a form submit, so constraint validation
+     never fires and `.value` still reads back an out-of-range number. The
+     realistic mistake passes min=50 anyway: a scale left in kg reads 57, which
+     scales every threshold by 0.578 and turns Silver into Diamond. */
+  if (val < 70 || val > 400) {
+    showToast(val >= 30
+      ? `${val} looks like kg — that's ${(val * 2.20462).toFixed(1)} lb. Enter pounds.`
+      : "Enter a bodyweight in pounds (70–400)");
+    return;
+  }
+
+  /* saveWorkout does not reset currentLogDate and only clearForm does, so a
+     back-filled session leaves the picker in the past — and on a phone it has
+     scrolled off-screen by the time this input is in view. Stepping on the
+     scale then wrote today's weight onto that older date, where the upsert
+     below DESTROYED the real reading for it, in the app and in the sheet, with
+     no undo. Confirming is enough: the mistake is never deliberate. */
+  if (date !== todayISO() &&
+      !confirm(`Log ${val} lb for ${date}? That is not today, and it will replace any weight already recorded for that date.`)) {
+    return;
+  }
 
   const entry = { date, weight: val };
   const idx   = weightLog.findIndex(e => e.date === date);
@@ -2449,7 +2494,11 @@ function groupDetailHtml(group) {
       // What that session was actually worth, so you can see which ones moved you.
       const v  = ex ? setValue(ex, best) : null;
       const st = ex ? stdForExercise(ex, e.variant || (ex.variants && ex.variants[0])) : null;
-      const pc = v != null && st ? percentileFor(v, st, currentBodyweight()) : null;
+      /* asOf, not today. groupSeries directly above this scores each point at
+         the bodyweight of ITS date; this list did not, so the same lift on the
+         same screen read a division lower than the chart point for that date,
+         drifting steadily pessimistic across a bulk. */
+      const pc = v != null && st ? percentileFor(v, st, currentBodyweight(w.date)) : null;
       const tf = pc != null ? tierFromPct(pc) : null;
       recent.push(`
         <div class="act-row">
@@ -2514,9 +2563,10 @@ function groupDetailHtml(group) {
           </dl>
           <p class="scoring-note">Percentiles are against <strong>people who log lifts on Strength
             Level</strong> — a committed population, well above average. Thresholds scale with
-            bodyweight, so this measures strength <em>per pound</em>. Untrained groups slip after
-            ${STALE.afterDays} days are marked as unmeasured — the rank is held, not lowered,
-            because not training is not the same as getting weaker.</p>
+            bodyweight, so this measures strength <em>per pound</em>. A group you have not trained
+            for ${STALE.afterDays} days is flagged as ageing and after ${STALE.provisionalDays} reads
+            as unmeasured — the rank is <strong>held, never lowered</strong>, because not training is
+            not the same as getting weaker.</p>
         </div>
       </details>
     </div>

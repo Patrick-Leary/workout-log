@@ -24,6 +24,15 @@ never produce a Foods row.
 osascript -l JavaScript tests/import_test.js
 ```
 
+`weight_test.js` covers the bodyweight path and its blast radius: the plausibility
+guard (a kg reading is the realistic error and it passes `min=50`), the back-dated
+confirm, sorting on arrival from the sheet, `asOf` resolution including the honest
+130 lb fallback, and the cable lateral raise being loggable but unranked.
+
+```bash
+osascript -l JavaScript tests/weight_test.js
+```
+
 Every case in `sync_test.js` started as a reproduction of a bug that shipped. Adding a
 failing test first is the point — several of these "obviously correct" paths
 passed review and still lost data.

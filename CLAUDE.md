@@ -361,6 +361,63 @@ photographing labels because the 22 extra columns are a data-entry chore. That w
 on the *value*, which is unchanged and still modest. Photograph labels for foods that repeat; do
 not go looking for them.
 
+## Weight path — audit fixes (2026-09-12)
+
+A critic pass over bodyweight found four routes to a wrong rank from a right lift.
+The framing that matters: **the weight feature is small, but bodyweight is an INPUT** —
+every weighted rank divides by `(bw/130)^0.67`, so its bugs surface everywhere except
+where they are caused. On this log a **~3 lb error crosses a division**.
+
+- ⚠️ **Bodyweight is validated now (70–400 lb), and it is the only input that needed it.**
+  The markup's `min`/`max` never fired: the control is a plain `<button onclick>`, not a
+  form submit, so constraint validation never runs and `.value` still returns the
+  out-of-range number. The realistic mistake passes `min=50` anyway — a scale left in kg
+  reads 57, scaling every threshold by 0.578 and turning a Silver 1 pulldown into
+  **Diamond 1**. Nothing on Progress displays the bodyweight in use, so it is invisible
+  exactly where it does the damage. The guard names kg explicitly when it sees one.
+- ⚠️ **`getWeightLog` treated a blank weight cell as 0.** `Number("")` is `0` and
+  `!isNaN(0)` is true, so the row survived the filter, and `Number(0) || STD_REF_BW`
+  then substituted the 130 lb reference for a real 127.4 — demoting every weighted lift
+  a division and putting a 0 lb point on the chart. **Blank is not zero here either.**
+  Fixed, and the tab is now read by header name like every other one; it was the last
+  place addressing columns positionally, which quietly voided the "reorder columns
+  freely" guarantee for the one tab that scales all of Progress.
+- ⚠️ **A back-dated workout silently destroyed a weigh-in.** `saveWeight` takes
+  `currentLogDate`, `saveWorkout` never resets it, and on a phone the picker has scrolled
+  off-screen by the time the weight input is in view. Back-filling Monday on Wednesday and
+  then stepping on the scale wrote Wednesday's weight onto Monday, where the upsert
+  destroyed Monday's real reading in app and sheet with no undo. Now confirmed when the
+  date is not today.
+- **The fetch path was the only one not sorting `weightLog`.** `saveWeight` and the JSON
+  import both sort; `getWeightLog` returns sheet ROW order, so a back-filled date lands
+  last. Ranks were safe (`currentBodyweight` sorts its own pool) but the trend stat reads
+  endpoints positionally: a real **+1.56 lb/wk "fast — likely not all tissue"** rendered
+  as **"too early to read"**, understating the gain by 80%, with the chart below it
+  drawing the truth.
+- **One `asOf` leak.** Group-detail "Recent activity" scored history at *today's*
+  bodyweight while `groupSeries` directly above it used each point's own date — the same
+  lift reading a division apart on one screen, drifting pessimistic across a bulk. The
+  rest of the `asOf` threading was verified correct.
+- Scoring copy still described the decay removed on 2026-09-07 and named the wrong
+  threshold. Copy only, but it told the user a removed behaviour was live.
+
+⚠️ **`appsscript.js` changed — paste it into the Apps Script editor and create a NEW
+deployment version.** Saving alone does not update the web app.
+✅ **Done and verified 2026-09-12**: redeployed, and a live fetch returned all 66 weigh-ins with
+no zero/invalid rows and the other three tabs intact — which also confirms the header-based
+`readTable` path found `Date` / `Weight (lbs)` correctly.
+
+### Cable lateral raise: logged, not ranked (2026-09-12)
+`latraise` mapped all three variants to `latraise-db`, a **per-dumbbell** curve, while
+`perHand` named only the two dumbbell ones. Patrick's cable version is a **two-arm bar on
+one stack**, so the entered number is the load for BOTH arms: scoring it against that curve
+inflated by **2.25 rungs** (Gold 2 → Diamond 1 at 15 lb/hand × 12), larger than the split-squat
+bug it mirrors, and it printed `18 lb/hand` for one variant and `18 lb` for another off the
+same curve. Strength Level publishes no two-arm lateral raise, so **Cable is absent from
+`std`** — loggable, unranked. Fourth instance of the standing rule: when the entered number
+is not what the curve measures, log it and leave it unranked rather than invent a standard.
+Caught with **zero history logged**, so no past rank was ever wrong.
+
 ## Progress page — traps found by review (2026-09-07)
 A design critique caught five shipped defects the author's own screenshots missed. Recorded because
 four of them are invisible in a screenshot and will recur:
