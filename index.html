@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300..700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles/style.css?v=1789006654" />
+  <link rel="stylesheet" href="styles/style.css?v=1789244244" />
 </head>
 <body>
 <div class="app">
@@ -104,6 +104,9 @@
           </select>
         </div>
         <div class="food-results" id="food-results"></div>
+        <button class="btn btn-ghost btn-sm food-import-open" onclick="toggleFoodImport(true)">
+          Paste from Claude
+        </button>
       </div>
 
       <div class="food-custom" id="food-custom" hidden>
@@ -129,6 +132,25 @@
           <button class="btn btn-primary btn-sm" onclick="addCustomFood()">Add item</button>
           <button class="btn btn-ghost btn-sm" onclick="toggleCustomFood(false)">Cancel</button>
         </div>
+      </div>
+
+      <div class="food-import" id="food-import" hidden>
+        <div class="food-custom-title">Paste from Claude</div>
+        <p class="fi-help">
+          A <strong>FOOD</strong> block goes to the database (a label was read).
+          An <strong>ITEM</strong> block goes into this day's log (a meal was estimated).
+          Paste the whole reply — anything outside a block is ignored.
+        </p>
+        <textarea class="text-input fi-text" id="fi-text" rows="6" autocomplete="off"
+          spellcheck="false" oninput="onImportInput(this.value)"
+          aria-label="Paste a FOOD or ITEM block"
+          placeholder="FOOD&#10;name: Olipop Cherry Vanilla&#10;serving: 1 can (355 mL)&#10;cal: 40&#10;…"></textarea>
+        <div class="field-row">
+          <button class="btn btn-primary btn-sm" onclick="reviewImport()">Review</button>
+          <button class="btn btn-ghost btn-sm" onclick="toggleFoodImport(false)">Close</button>
+          <button class="btn btn-ghost btn-sm" onclick="discardImport()">Discard</button>
+        </div>
+        <div id="fi-review"></div>
       </div>
 
       <div id="food-items"></div>
@@ -228,6 +250,7 @@
         <p class="settings-desc" id="drift-status">Checking…</p>
         <div class="field-row">
           <button class="btn btn-ghost" onclick="openDriftReview()">Review differences</button>
+          <button class="btn btn-ghost" onclick="switchTab('food');toggleFoodImport(true)">Add foods by paste</button>
         </div>
       </div>
 
@@ -269,6 +292,6 @@
   </div>
 </div>
 
-<script src="scripts/app.js?v=1789006654"></script>
+<script src="scripts/app.js?v=1789244244"></script>
 </body>
 </html>

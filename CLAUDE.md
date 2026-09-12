@@ -238,8 +238,6 @@ common "it's broken" cause, closely followed by sync settings being per-browser.
   pull-ups, barbell row, barbell RDL, barbell/cable curl, dumbbell squat, bodyweight squat.
   Bodyweight squat is the only plausible near-term one. **Do not add standards speculatively** —
   every entry is a number someone has to trust, and a wrong one is worse than "Unranked".
-- **Paste bridge**: paste the phone Project's item lines → review table → save. The "approve and
-  sync" flow; matched-vs-estimated is the point of the review step.
 - **Cross-device setup** — URL and secret are typed by hand per browser. Has cost the owner time
   three times.
 - No way to delete a *workout* date's food from the app except by emptying it and saving.
@@ -282,6 +280,86 @@ strongest predictor of 12-month retention. This app is a precision instrument fo
 📌 **And stop investing in the 24-nutrient food schema.** At 127 lb lean bulking, calories and
 protein move the outcome; the other 22 columns are a data-entry chore on an app whose stated top
 risk is abandonment. Leave it (it self-migrates and costs nothing) but stop photographing labels.
+
+## Paste bridge — the phone path into Foods (2026-09-12)
+
+Built because the Apps Script URL lives only in this app's `localStorage`, per device: Claude on the
+phone cannot POST to the sheet, so **the app has to be the writer**. Claude estimates, the app records.
+
+**Two block types, and the split is the whole safety property:**
+
+```
+FOOD                        ITEM
+name: Olipop Shirley Temple name: cafeteria salmon bowl
+brand: Olipop               meal: Lunch
+serving: 1 can (355 mL)     qty: 1
+cal: 40                     cal: 640
+verified: yes               conf: low
+END                         END
+```
+
+`FOOD` → a row in the `Foods` tab (a label was READ). `ITEM` → one row in the day's log (a meal was
+ESTIMATED). ⚠️ **An `ITEM` block can never produce a Foods row, by construction** — not by a flag
+the parser could get wrong. This is the same rule as `addCustomFood`: nothing auto-promotes, because
+promotion is what would refill the database with the guesses `Verified` exists to quarantine. A
+`FOOD` block that does not assert `verified: yes` defaults to **no**, and the review row makes it a
+visible tap rather than a parser decision.
+
+- **`key: value` lines, not JSON.** A model emits it reliably, it survives a phone's copy-paste, it
+  is order-independent, and **an absent line means UNKNOWN rather than a parse error** — which is
+  how blank≠zero survives the trip. Anything outside a block (prose, fences, `#` comments, the
+  Project's `RUNNING TOTAL:` line) is ignored, so the realistic paste is the whole reply.
+- ⚠️ **Unknowns are OMITTED from the `_type:"foods"` payload, never sent as `null`.** The upsert
+  leaves a cell alone for any field the payload lacks, so a label listing 11 of 25 nutrients updates
+  those 11 and preserves the rest. Sending `null` would blank real values. `tests/import_test.js`
+  asserts this on the wire, because it is invisible anywhere else.
+- **Importing items does NOT sync.** Rows land locally and mark the day dirty; **Save Day owns the
+  write and its conflict baseline.** An import that synced on its own would bypass the guard that
+  2026-09-09 exists to enforce.
+- The draft persists to `ll_import_draft` — a phone in a shop loses signal and reloads, and losing
+  the paste means walking back to the shelf.
+- `<1 g` records the midpoint (0.5) and **says so in the review**: 0 understates a real amount, 1
+  overstates it, and a laundered guess is the failure mode `Conf` exists to prevent.
+- Entry point is under the food search, where "I searched and it wasn't there" actually happens.
+
+### Two defects the critics found the same day it shipped (2026-09-12)
+
+Both were in code that had 50 passing tests and a browser check. The tests asserted the behaviour
+the author *designed*, not the behaviour he *shipped* — which is why a reviewer with a different
+frame found them in one pass and the author's own suite did not.
+
+- ⚠️ **A partial `FOOD` block overwrote `Serving` and `Verified`.** `brand`, `microSrc` and all 25
+  nutrients were conditioned in the payload; `serving` and `verified` were not — and the parser
+  guaranteed they were never absent, defaulting to `"1 serving"` and `"no"`. So a follow-up block
+  adding one looked-up micronutrient replaced a real `1 can (355 mL)` with a fabrication and
+  demoted a label-verified row to `no`. **The 24 nutrient cells survived correctly, which is what
+  made it quiet**: the row kept its numbers and lost the two fields saying what the numbers are
+  *per* and whether a human read a label. Partial blocks are a designed-for case — the parser
+  itself emits a "treated as a partial update" flag for them. Fixed by making `verified` tri-state
+  (`yes`/`no`/`""` = unstated) and omitting both when the block is silent, with the review chip
+  cycling through `unchanged`. **The general rule: a default supplied at parse time becomes a lie
+  at write time.** Anything the payload sends unconditionally must be something the user stated.
+- ⚠️ **`commitImportItems` was the only mutation path bypassing `nutVal()`.** Writing `r[k]` raw
+  made it the only way a **core** macro could land as `null` on a logged row. That matters because
+  the `>=` floor marker and the coverage readout cover **micros only** (`renderMicroSummary`
+  filters `!n.core`), while `foodTotals` sums `Number(it[k]) || 0` — so an `ITEM` honestly omitting
+  `fib` produced a day reading a flat 18g against a 28g DV with nothing marking it incomplete.
+  The prompt compounded it by telling the model to omit anything it did not know, with no carve-out
+  for the seven core macros; **both halves were fixed**, since the app's convention is core-floors-
+  to-0 and the model must therefore always estimate those seven.
+
+Also fixed: an `ITEM`'s `key` was trimmed but not slugged, so `Kirkland-Protein-Bar` looked linked
+and behaved unlinked — silently excluded from `scanDrift()` forever; the review panel's
+destination-date header went stale when the picker moved while `commitImportItems` read the date
+live; and the `try` wrapped the bookkeeping as well as the POST, so discarding a paste mid-flight
+reported **"Couldn't save"** over a write that had landed. Given this file's history is the inverse
+lie ("says synced but isn't"), a false failure that invites a duplicate re-do is worth closing too.
+
+📌 **This reopens a judgment, and the reopening is deliberate.** The note above says to stop
+photographing labels because the 22 extra columns are a data-entry chore. That was a verdict on the
+*cost*, and this feature changes the cost — a label is now a photo and a paste. It is not a verdict
+on the *value*, which is unchanged and still modest. Photograph labels for foods that repeat; do
+not go looking for them.
 
 ## Progress page — traps found by review (2026-09-07)
 A design critique caught five shipped defects the author's own screenshots missed. Recorded because

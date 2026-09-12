@@ -19,6 +19,8 @@ A lightweight, mobile-friendly workout tracker that runs entirely in your browse
   ladder goes
 - **Progress tracking** — all-time personal bests, session count, and streak counter per exercise
 - **Google Sheets sync** *(optional)* — automatically push every saved workout to a Google Sheet via Apps Script
+- **Paste to add foods** — paste a `FOOD` block (from a nutrition label) straight into your food
+  database, or an `ITEM` block into the day's log, without typing 25 numbers by hand
 - **Export / Import JSON** — back up your data or move it between devices
 - **Light & dark mode** — respects your system preference with a manual toggle
 - **Works offline** — no internet required after the first load
@@ -31,7 +33,9 @@ Open the live link above on any device. No sign-in needed.
 
 - **Today** — everything you enter: select a date, fill in your sets, hit Save Workout, and log
   your body weight below it
-- **Food** — search your food database, tap to add, adjust servings, watch the day's totals
+- **Food** — search your food database, tap to add, adjust servings, watch the day's totals.
+  **Paste from Claude** takes a block of `key: value` lines and turns it into database rows or
+  logged items — see below
 - **Progress** — everything you look back at: movement-pattern coverage, per-muscle-group ranks
   (tap a tile to drill into its exercises), weight trend, and every past workout
 - **Settings** — configure Google Sheets sync, export/import data
@@ -164,6 +168,35 @@ If you want your own hosted version at your own URL:
 
 ***
 
+## Adding foods by paste
+
+Typing a nutrition label into 25 fields on a phone is the reason food databases go unfilled. The
+**Paste from Claude** box on the Food tab takes plain `key: value` lines instead. Two block types:
+
+```
+FOOD                              ITEM
+name: Olipop — Shirley Temple     name: cafeteria salmon bowl
+brand: Olipop                     meal: Lunch
+serving: 1 can (355mL)            qty: 1
+cal: 40                           cal: 640
+protein: 0                        p: 41
+fiber: 6                          conf: low
+sodium: 30 mg                     END
+verified: yes
+END
+```
+
+- **`FOOD`** adds or updates a row in your food database — use it when you have read a label.
+- **`ITEM`** adds one entry to the day you are looking at — use it for a meal you estimated. It
+  never becomes a database row, so estimates cannot quietly become "verified" numbers.
+
+Paste the whole message; anything outside a block is ignored. Long names (`Protein`, `Saturated
+Fat`, `Added Sugars`) work as well as the short keys. **Leave a nutrient out if you don't know it**
+— a missing line means unknown, and the app tracks how much of each day is actually covered. Press
+**Review** to see what was understood before anything is saved, then add what you want.
+
+***
+
 ## Project Structure
 
 ```
@@ -171,8 +204,9 @@ workout-log/
 ├── index.html          # App shell and markup
 ├── styles/
 │   └── style.css       # All styles and design tokens
-└── scripts/
-    └── app.js          # All application logic
+├── scripts/
+│   └── app.js          # All application logic
+└── tests/              # JXA test suites (see tests/README.md)
 ```
 
 No frameworks, no build tools, no dependencies. Runs directly in the browser.

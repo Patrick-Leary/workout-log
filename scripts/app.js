@@ -689,7 +689,7 @@ function updateAddExerciseBtn() {
       ${available.map(ex => `
         <button class="picker-option" onclick="addExerciseToLog('${ex.id}')">
           <span class="picker-name">${ex.name}</span>
-          <span class="exercise-tag">${ex.tag}</span>
+          <span class="exercise-tag">${ex.group}</span>
         </button>`).join("")}
     </div>`;
 }
@@ -735,7 +735,7 @@ function addExerciseToLog(exId, prefilledSets = null, prefilledVariant = null) {
       </div>
       <div style="display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap;justify-content:flex-end">
         <span class="prev-best">${prevText}</span>
-        <span class="exercise-tag">${ex.tag}</span>
+        <span class="exercise-tag">${ex.group}</span>
         <button class="btn btn-ghost btn-sm btn-danger" onclick="removeExercise('${ex.id}')" aria-label="Remove ${ex.name}">×</button>
       </div>
     </div>
@@ -2644,8 +2644,8 @@ function renderFoodResults() {
 
   const results = foodSearchResults();
   if (!results.length) {
-    el.innerHTML = `<div class="food-empty">No match. Use <strong>Custom item</strong> below
-      for anything not in the database.</div>`;
+    el.innerHTML = `<div class="food-empty">No match. <strong>Paste from Claude</strong> to add it from a
+      label photo, or use <strong>Custom item</strong> for a one-off.</div>`;
     return;
   }
 
@@ -2771,6 +2771,428 @@ function removeFoodItem(id) {
   nutrition = nutrition.filter(n => n.id !== id);
   persist();
   renderFoodTab();
+}
+
+// ── FOOD IMPORT: paste a block captured on the phone ──────────────────────
+/* The gap this closes: a label read in a shop, or a plate estimated in a
+   cafeteria, used to have to survive in a chat until Patrick was back at the
+   Mac. The Apps Script URL lives only in this app's localStorage — per device,
+   never on disk, never in chat — so the app is the only thing on the phone that
+   can write to the sheet. Claude estimates; the app records.
+
+   TWO BLOCK TYPES, and the distinction is load-bearing:
+
+     FOOD  → a row in the Foods database.  A label was READ.
+     ITEM  → one entry in today's log.     A meal was ESTIMATED.
+
+   They are separate types precisely so an estimate cannot become a database
+   row. `Verified` exists to quarantine guessed numbers; if a plate photo could
+   emit a FOOD block, the column would stop meaning anything and the database
+   would refill with exactly the values it was built to keep out. Same rule as
+   addCustomFood(): nothing auto-promotes.
+
+   The wire format is `key: value` lines rather than JSON because a model emits
+   it reliably, it survives a phone's copy-paste, it is order-independent, and
+   an ABSENT LINE MEANS UNKNOWN rather than a parse error — which is what keeps
+   blank distinguishable from zero all the way into the sheet. A label listing
+   11 of the 25 nutrients must not write 14 zeros. */
+
+const IMPORT_DRAFT_KEY = "ll_import_draft";
+let importParsed = null;
+
+/* Spelled-out names a model reaches for, mapped onto the sheet's short keys.
+   Normalisation strips everything but a-z0-9 first, so "Sat. Fat", "sat fat"
+   and "SaturatedFat" all arrive here as one string. */
+const IMPORT_FIELD_ALIASES = {
+  calories: "cal", kcal: "cal", energy: "cal",
+  protein: "p", prot: "p",
+  carb: "c", carbs: "c", carbohydrate: "c", carbohydrates: "c", totalcarbohydrate: "c",
+  fiber: "fib", fibre: "fib", dietaryfiber: "fib", dietaryfibre: "fib",
+  totalfat: "fat",
+  saturated: "sat", saturatedfat: "sat", satfat: "sat",
+  sodium: "na", salt: "na",
+  transfat: "trans",
+  cholesterol: "chol",
+  sugars: "sugar", totalsugar: "sugar", totalsugars: "sugar",
+  addedsugar: "addsug", addedsugars: "addsug", added: "addsug",
+  vitamind: "vitd", calcium: "ca", iron: "fe", potassium: "k",
+  vitamina: "vita", vitaminc: "vitc", vitamine: "vite", vitamink: "vitk",
+  vitaminb6: "b6", vitaminb12: "b12", folicacid: "folate",
+  magnesium: "mg", zinc: "zn", alcohol: "alc", ethanol: "alc",
+  quantity: "qty", servings: "qty", amount: "qty",
+  confidence: "conf", source: "src",
+  micro: "microsrc", microsource: "microsrc", microsrc: "microsrc",
+  size: "serving", servingsize: "serving",
+};
+
+const IMPORT_FOOD_FIELDS = new Set(
+  ["key", "name", "brand", "serving", "verified", "microsrc"].concat(FOOD_MACROS));
+const IMPORT_ITEM_FIELDS = new Set(
+  ["key", "name", "meal", "qty", "conf", "src"].concat(FOOD_MACROS));
+
+function normImportKey(raw) {
+  const k = String(raw || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  return IMPORT_FIELD_ALIASES[k] || k;
+}
+
+/* Absent, blank and "n/a" all mean UNKNOWN, and all return null. A real 0 --
+   0g trans fat is a fact a label states -- must survive as 0. */
+function importNum(raw) {
+  const s = String(raw ?? "").trim().toLowerCase();
+  if (!s) return null;
+  if (["-", "—", "–", "n/a", "na", "null", "none", "unknown", "?", "tbd"].includes(s)) return null;
+
+  // "<1 g". FDA rounding puts the true value somewhere in [0,1), so record the
+  // midpoint: 0 understates a real amount, 1 overstates it. Flagged in review
+  // so the guess is visible rather than laundered into a clean-looking number.
+  const lt = s.match(/^<\s*([\d.]+)/);
+  if (lt) { const n = Number(lt[1]); return Number.isFinite(n) ? n / 2 : null; }
+
+  const m = s.replace(/,/g, "").match(/-?\d*\.?\d+/);
+  if (!m) return null;
+  const n = Number(m[0]);
+  return Number.isFinite(n) ? n : null;
+}
+
+/* Key normalisation, shared by both block types. An ITEM's key used to be
+   trimmed only, so `key: Kirkland-Protein-Bar` stored verbatim matched no Foods
+   row — the row LOOKED linked and behaved unlinked, which silently excluded it
+   from scanDrift()/refreshDay() forever. Same slug on both paths or neither. */
+function normImportSlug(raw) {
+  return String(raw || "").trim().toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+/* Tri-state, and the third state is the point: "" means the block did not say.
+   An unstated value must stay unstated all the way to the payload, or a partial
+   update overwrites a label-verified row with a fabricated default. */
+function importVerified(raw) {
+  const str = String(raw ?? "").trim();
+  if (!str) return "";
+  return /^(y|yes|true|1)$/i.test(str) ? "yes" : "no";
+}
+
+/* A stable key so the same product re-imported later UPDATES its row instead of
+   appending a second one. Brand is prefixed only when the name doesn't already
+   carry it, so "Olipop" + "Olipop Cherry" doesn't become olipop-olipop-cherry. */
+function slugifyFoodKey(name, brand) {
+  const b = String(brand || "").trim();
+  const n = String(name || "").trim();
+  const base = b && !n.toLowerCase().startsWith(b.toLowerCase()) ? `${b} ${n}` : n;
+  return base.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
+}
+
+function normalizeMeal(v) {
+  const s = String(v || "").trim().toLowerCase();
+  return ["Breakfast", "Lunch", "Snack", "Dinner"].find(m => m.toLowerCase() === s) || defaultMeal();
+}
+
+/* Tolerant by design: the realistic paste is a whole chat reply, fences and
+   prose included. Anything outside a FOOD/ITEM block is ignored rather than
+   treated as an error, so "RUNNING TOTAL:" lines and commentary cost nothing. */
+function parseFoodBlocks(text) {
+  const res = { foods: [], items: [], warnings: [] };
+  let cur = null;
+
+  const finish = () => {
+    if (!cur) return;
+    const block = cur;
+    cur = null;
+    if (block.type === "FOOD") finishImportFood(block, res);
+    else finishImportItem(block, res);
+  };
+
+  String(text || "").split(/\r?\n/).forEach(rawLine => {
+    let line = rawLine.trim();
+    if (!line || line.startsWith("#") || /^```/.test(line)) return;
+    line = line.replace(/^[-*•>]\s+/, "").trim();
+    if (!line) return;
+
+    const head = line.replace(/[:：]\s*$/, "").trim().toUpperCase();
+    if (head === "FOOD" || head === "ITEM") { finish(); cur = { type: head, fields: {}, flags: [] }; return; }
+    if (head === "END") { finish(); return; }
+    if (!cur) return;
+
+    const m = line.match(/^([A-Za-z][A-Za-z0-9 _./-]*?)\s*[:=]\s*(.*)$/);
+    if (!m) return;
+    const key = normImportKey(m[1]);
+    const val = m[2].trim();
+    if (!key) return;
+    cur.fields[key] = val;
+    if (/^<\s*[\d.]/.test(val)) cur.flags.push(`${key}: "${val}" recorded as ${importNum(val)}`);
+  });
+
+  finish();
+  return res;
+}
+
+function finishImportFood(block, res) {
+  const f = block.fields;
+  const name = String(f.name || "").trim();
+  if (!name) { res.warnings.push("A FOOD block had no name line and was skipped."); return; }
+
+  const row = {
+    key: normImportSlug(f.key) || slugifyFoodKey(name, f.brand),
+    name,
+    brand: String(f.brand || "").trim(),
+    // NOT defaulted. "1 serving" used to be substituted here, and because the
+    // payload sent `serving` unconditionally, a partial block then overwrote a
+    // real "1 can (355 mL)" with a fabrication. Absent means absent.
+    serving: String(f.serving || "").trim(),
+    // "" when the block is silent. The review chip cycles yes/no/unstated so a
+    // yes is still a visible assertion, never something the parser decided.
+    verified: importVerified(f.verified),
+    microSrc: String(f.microsrc || "").trim(),
+    _pick: true,
+    _flags: block.flags.slice(),
+  };
+
+  FOOD_MACROS.forEach(k => { row[k] = f[k] === undefined ? null : importNum(f[k]); });
+  row._blanks = FOOD_MACROS.filter(k => row[k] === null).length;
+
+  const unknown = Object.keys(f).filter(k => !IMPORT_FOOD_FIELDS.has(k));
+  if (unknown.length) row._flags.push("ignored fields: " + unknown.join(", "));
+  if (row.cal === null) row._flags.push("no calories — treated as a partial update");
+
+  res.foods.push(row);
+}
+
+function finishImportItem(block, res) {
+  const f = block.fields;
+  const name = String(f.name || "").trim();
+  if (!name) { res.warnings.push("An ITEM block had no name line and was skipped."); return; }
+
+  const qty = importNum(f.qty);
+  const conf = String(f.conf || "").trim().toLowerCase();
+  const item = {
+    name,
+    key: normImportSlug(f.key),
+    meal: normalizeMeal(f.meal),
+    qty: qty === null || qty <= 0 ? 1 : qty,
+    // An ITEM came from a photo or a description, so it is an estimate unless
+    // the block says a label was read for it. Either way it stays in the log
+    // and never reaches the Foods tab.
+    source: /^label$/i.test(String(f.src || "").trim()) ? "label" : "estimate",
+    conf: ["high", "med", "low"].includes(conf) ? conf : "med",
+    _pick: true,
+    _flags: block.flags.slice(),
+  };
+
+  FOOD_MACROS.forEach(k => { item[k] = f[k] === undefined ? null : importNum(f[k]); });
+  item._blanks = FOOD_MACROS.filter(k => item[k] === null).length;
+
+  const unknown = Object.keys(f).filter(k => !IMPORT_ITEM_FIELDS.has(k));
+  if (unknown.length) item._flags.push("ignored fields: " + unknown.join(", "));
+  if (item.cal === null) item._flags.push("no calories — this row adds nothing to the day's total");
+
+  res.items.push(item);
+}
+
+// ── FOOD IMPORT: screen ───────────────────────────────────────────────────
+
+function toggleFoodImport(open) {
+  const el = document.getElementById("food-import");
+  if (!el) return;
+  el.hidden = !open;
+  if (!open) return;
+  toggleCustomFood(false);
+  const ta = document.getElementById("fi-text");
+  if (ta) {
+    // A phone in a shop loses signal and reloads. The draft is the paste, and
+    // losing it means walking back to the shelf.
+    if (!ta.value) { try { ta.value = localStorage.getItem(IMPORT_DRAFT_KEY) || ""; } catch (e) {} }
+    ta.focus();
+    if (ta.value) reviewImport();
+  }
+}
+
+function onImportInput(v) {
+  try { localStorage.setItem(IMPORT_DRAFT_KEY, v); } catch (e) {}
+}
+
+function clearImportDraft() {
+  const ta = document.getElementById("fi-text");
+  if (ta) ta.value = "";
+  try { localStorage.removeItem(IMPORT_DRAFT_KEY); } catch (e) {}
+}
+
+function reviewImport() {
+  const ta = document.getElementById("fi-text");
+  importParsed = parseFoodBlocks(ta ? ta.value : "");
+  renderImportReview();
+}
+
+function discardImport() {
+  importParsed = null;
+  clearImportDraft();
+  renderImportReview();
+  toggleFoodImport(false);
+}
+
+function toggleImportPick(kind, i) {
+  const list = kind === "food" ? importParsed?.foods : importParsed?.items;
+  const row = list && list[i];
+  if (!row) return;
+  row._pick = !row._pick;
+  renderImportReview();
+}
+
+/* Cycles unstated -> yes -> no -> unstated. Unstated has to be reachable: it is
+   the only value that preserves whatever the sheet already holds. */
+function toggleImportVerified(i) {
+  const row = importParsed?.foods?.[i];
+  if (!row) return;
+  row.verified = row.verified === "" ? "yes" : row.verified === "yes" ? "no" : "";
+  renderImportReview();
+}
+
+/* Rows are addressed positionally, the same way the food picker does it, so
+   nothing a model wrote is ever interpolated into an inline handler. */
+function renderImportReview() {
+  const el = document.getElementById("fi-review");
+  if (!el) return;
+  if (!importParsed) { el.innerHTML = ""; return; }
+
+  const { foods: rows, items, warnings } = importParsed;
+  if (!rows.length && !items.length) {
+    el.innerHTML = `<div class="food-empty">Nothing found. Expected a block starting with
+      <strong>FOOD</strong> (a label → the database) or <strong>ITEM</strong> (a meal → today's log).</div>`;
+    return;
+  }
+
+  const flags = r => r._flags.map(f => `<div class="fi-flag">${esc(f)}</div>`).join("");
+  const nut = (v, u) => (v === null ? "—" : fmtNum(v) + u);
+  let html = "";
+
+  if (rows.length) {
+    const n = rows.filter(r => r._pick).length;
+    html += `<div class="fi-group-title">To the food database</div>` + rows.map((r, i) => {
+      const exists = foods.some(x => x.key === r.key);
+      return `<div class="fi-card${r._pick ? "" : " fi-off"}">
+        <button class="fi-pick" onclick="toggleImportPick('food',${i})"
+          aria-pressed="${r._pick}" aria-label="Include ${esc(r.name)}">${r._pick ? "✓" : ""}</button>
+        <div class="fi-body">
+          <div class="fi-name">${esc(r.name)}${r.brand ? ` <span class="fr-brand">${esc(r.brand)}</span>` : ""}</div>
+          <div class="fi-meta">${nut(r.cal, "")} cal · ${nut(r.p, "g")} P<span class="fr-serving">${
+            r.serving ? esc(r.serving) : (exists ? "serving unchanged" : "no serving given")}</span></div>
+          <div class="fi-sub"><code>${esc(r.key)}</code> · ${exists ? "updates an existing row" : "new row"}
+            · ${FOOD_MACROS.length - r._blanks}/${FOOD_MACROS.length} nutrients</div>
+          <button class="fi-chip${r.verified === "yes" ? " fi-chip-on" : ""}"
+            onclick="toggleImportVerified(${i})">Verified: ${
+            r.verified || (exists ? "unchanged" : "no")}</button>
+          ${flags(r)}
+        </div></div>`;
+    }).join("") +
+    `<button class="btn btn-primary fi-commit" onclick="commitImportFoods()" ${n ? "" : "disabled"}>
+       Add ${n} to database</button>`;
+  }
+
+  if (items.length) {
+    const n = items.filter(r => r._pick).length;
+    html += `<div class="fi-group-title">To ${esc(currentFoodDate)}</div>` + items.map((r, i) => `
+      <div class="fi-card${r._pick ? "" : " fi-off"}">
+        <button class="fi-pick" onclick="toggleImportPick('item',${i})"
+          aria-pressed="${r._pick}" aria-label="Include ${esc(r.name)}">${r._pick ? "✓" : ""}</button>
+        <div class="fi-body">
+          <div class="fi-name">${esc(r.name)}</div>
+          <div class="fi-meta">${nut(r.cal, "")} cal · ${nut(r.p, "g")} P<span class="fr-serving">${esc(r.meal)} · ×${r.qty}</span></div>
+          <div class="fi-sub">${esc(r.source)} · confidence ${esc(r.conf)}</div>
+          ${flags(r)}
+        </div></div>`).join("") +
+    `<button class="btn btn-primary fi-commit" onclick="commitImportItems()" ${n ? "" : "disabled"}>
+       Add ${n} to the day</button>`;
+  }
+
+  if (warnings.length) {
+    html += `<div class="fi-warnings">${warnings.map(w => `<div class="fi-flag">${esc(w)}</div>`).join("")}</div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+async function commitImportFoods() {
+  if (!importParsed) return;
+  const rows = importParsed.foods.filter(r => r._pick);
+  if (!rows.length) { showToast("Nothing selected"); return; }
+  if (!sheetsUrl) {
+    showToast("This browser isn't connected to your sheet — paste the URL in Settings");
+    return;
+  }
+
+  /* Unknowns are OMITTED, not sent as null. The upsert leaves a cell alone for
+     any field the payload doesn't carry, so a label listing 11 of 25 nutrients
+     updates those 11 and preserves whatever the row already had for the rest.
+     Sending null would overwrite real values with blanks. */
+  const payload = rows.map(r => {
+    const exists = foods.some(x => x.key === r.key);
+    const out = { key: r.key, name: r.name };
+    if (r.brand)    out.brand    = r.brand;
+    if (r.microSrc) out.microSrc = r.microSrc;
+    /* `serving` and `verified` are omitted when the block didn't state them, so
+       the upsert preserves what the row already had. They used to be sent
+       unconditionally against parser-supplied defaults, which meant a partial
+       block — a designed-for case — replaced a real serving with "1 serving"
+       and demoted Verified yes → no. The 24 nutrients survived, so the row kept
+       its numbers and lost the two fields saying what the numbers are per and
+       whether a human read a label. */
+    if (r.serving)  out.serving  = r.serving;
+    if (r.verified) out.verified = r.verified;
+    else if (!exists) out.verified = "no";   // nothing to preserve on a new row
+    FOOD_MACROS.forEach(k => { if (r[k] !== null) out[k] = r[k]; });
+    return out;
+  });
+
+  /* Only the network call is guarded. The try used to wrap everything after it
+     too, so a throw in the bookkeeping — discarding the paste mid-flight nulls
+     `importParsed` — reported "Couldn't save" over a write that had already
+     landed, inviting a duplicate re-do. This file's history is the inverse lie
+     ("says synced but isn't"); a false failure is worth closing too. */
+  let res;
+  try {
+    res = await postToSheets({ _type: "foods", foods: payload });
+  } catch (e) {
+    showToast(`Couldn't save: ${e.message} — your paste is kept`);
+    return;
+  }
+
+  showToast(`${res.added || 0} added, ${res.updated || 0} updated`);
+  if (importParsed) {
+    importParsed.foods = importParsed.foods.filter(r => !r._pick);
+    if (!importParsed.foods.length && !importParsed.items.length) clearImportDraft();
+    renderImportReview();
+  }
+  // Pull the canonical rows back so the picker has them immediately and the
+  // app's copy matches what the sheet actually stored.
+  await fetchFromSheets();
+  renderFoodTab();
+}
+
+function commitImportItems() {
+  if (!importParsed) return;
+  const rows = importParsed.items.filter(r => r._pick);
+  if (!rows.length) { showToast("Nothing selected"); return; }
+
+  rows.forEach(r => {
+    const item = { id: newFoodId(), date: currentFoodDate, meal: r.meal, key: r.key || "",
+                   name: r.name, qty: r.qty, source: r.source, conf: r.conf };
+    /* Through nutVal like every other mutation path. Writing r[k] raw made this
+       the ONLY way a core macro could land as null on a logged row — and the
+       floor marker and coverage readout cover micros only, so an omitted `fib`
+       rendered as a confident, wrong day total with nothing marking it. */
+    FOOD_MACROS.forEach(k => { item[k] = nutVal(r[k], k); });
+    nutrition.push(item);
+  });
+  markFoodDirty(currentFoodDate);
+  persist();
+
+  importParsed.items = importParsed.items.filter(r => !r._pick);
+  if (!importParsed.foods.length && !importParsed.items.length) clearImportDraft();
+  renderImportReview();
+  renderFoodTab();
+  /* Deliberately NOT auto-saving. Save Day owns the write and its conflict
+     baseline; an import that synced on its own would bypass that and could
+     overwrite a day edited on another device. */
+  showToast(`${rows.length} added to ${currentFoodDate} — press Save Day`);
 }
 
 // ── FOOD: save + sync ─────────────────────────────────────────────────────
@@ -3281,8 +3703,8 @@ function renderFoodResults() {
 
   const results = foodSearchResults();
   if (!results.length) {
-    el.innerHTML = `<div class="food-empty">No match. Use <strong>Custom item</strong> below
-      for anything not in the database.</div>`;
+    el.innerHTML = `<div class="food-empty">No match. <strong>Paste from Claude</strong> to add it from a
+      label photo, or use <strong>Custom item</strong> for a one-off.</div>`;
     return;
   }
 
@@ -3604,6 +4026,10 @@ document.getElementById("workout-date").addEventListener("change", e => {
 document.getElementById("food-date").addEventListener("change", e => {
   currentFoodDate = e.target.value;
   renderFoodTab();
+  // The review panel names the destination date, and commitImportItems reads
+  // currentFoodDate live — so without this the label said 09-11 while the tap
+  // wrote to 09-12, in the one part of this app where the date is the point.
+  renderImportReview();
 });
 
 document.getElementById("food-search").addEventListener("input", e => {

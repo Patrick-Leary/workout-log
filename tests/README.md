@@ -12,7 +12,19 @@ and a fake server that mirrors `staleWrite()` from `appsscript.js`. It covers
 the sync contract between the app and the sheet: write baselines, conflict
 detection, conflict recovery, retry behaviour, and the discard escape hatch.
 
-Every case in it started as a reproduction of a bug that shipped. Adding a
+`import_test.js` covers the paste-in path (`FOOD` / `ITEM` blocks) — the parser,
+its aliases and tolerances, and the two contracts that are only visible on the
+wire: that an unknown nutrient is OMITTED from the Foods payload rather than
+sent as null (sending null blanks a cell the sheet already had), and that an
+imported item is written locally and left for Save Day rather than synced
+behind the conflict baseline. It also pins the rule that an `ITEM` block can
+never produce a Foods row.
+
+```bash
+osascript -l JavaScript tests/import_test.js
+```
+
+Every case in `sync_test.js` started as a reproduction of a bug that shipped. Adding a
 failing test first is the point — several of these "obviously correct" paths
 passed review and still lost data.
 
