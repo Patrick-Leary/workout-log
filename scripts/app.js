@@ -2578,34 +2578,6 @@ function onFoodSearch(value) {
   renderFoodResults();
 }
 
-function renderFoodResults() {
-  const el = document.getElementById("food-results");
-  if (!el) return;
-
-  if (!foods.length) {
-    el.innerHTML = sheetsUrl
-      ? `<div class="food-empty">No food database found. Add a <strong>Foods</strong>
-         tab to your sheet, then reload.</div>`
-      : `<div class="food-empty"><strong>This browser isn't connected to your sheet.</strong><br>
-         Paste your deployment URL in <strong>Settings</strong>, then reload. Sync settings are
-         stored per browser, so each device needs it entered once.</div>`;
-    return;
-  }
-
-  const results = foodSearchResults();
-  if (!results.length) {
-    el.innerHTML = `<div class="food-empty">No match. <strong>Paste from Claude</strong> to add it from a
-      label photo, or use <strong>Custom item</strong> for a one-off.</div>`;
-    return;
-  }
-
-  el.innerHTML = results.map((f, i) => `
-    <button class="food-result" onclick="addFoodResult(${i})">
-      <span class="fr-name">${esc(f.name)}${f.brand ? ` <span class="fr-brand">${esc(f.brand)}</span>` : ""}</span>
-      <span class="fr-meta">${fmtNum(f.cal)} cal · ${fmtNum(f.p)}g P<span class="fr-serving">${esc(f.serving)}</span></span>
-    </button>`).join("");
-}
-
 function newFoodId() {
   return `f${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
 }
@@ -3761,8 +3733,8 @@ function showSaveConfirmation() {
   const el      = document.getElementById("save-confirm");
   const streakEl = document.getElementById("save-confirm-streak");
 
-  streakEl.textContent = streak > 1  ? `🔥 ${streak}-session streak`
-                       : streak === 1 ? "First session — keep it up!"
+  streakEl.textContent = streak.count > 1  ? `🔥 ${streak.count}-session streak`
+                       : streak.count === 1 ? "First session — keep it up!"
                        : "";
 
   el.classList.add("show");
