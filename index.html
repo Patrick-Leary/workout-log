@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lift Log</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300..700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles/style.css?v=1790453665" />
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="logo">
+      <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-label="Lift Log logo">
+        <rect x="3"  y="10" width="4" height="8" rx="1.5" fill="currentColor" opacity=".5"/>
+        <rect x="21" y="10" width="4" height="8" rx="1.5" fill="currentColor" opacity=".5"/>
+        <rect x="8"  y="6"  width="4" height="16" rx="2"  fill="currentColor" opacity=".8"/>
+        <rect x="16" y="6"  width="4" height="16" rx="2"  fill="currentColor" opacity=".8"/>
+        <rect x="11" y="11" width="6" height="6"  rx="1.5" fill="currentColor"/>
+      </svg>
+      <span class="logo-text">Lift Log</span>
+    </div>
+    <div class="topbar-right">
+      <div class="sync-status" id="sync-status" aria-live="polite"></div>
+      <button class="icon-btn" data-theme-toggle aria-label="Toggle theme">
+
+      </button>
+    </div>
+
+    <div class="sync-gate" id="sync-gate" role="status" aria-live="polite" hidden></div>
+  </header>
+
+  <main class="main">
+
+    <div class="tabs" role="tablist" aria-label="App sections">
+      <button class="tab active" role="tab" id="tab-log"      onclick="switchTab('log')">Today</button>
+      <button class="tab"        role="tab" id="tab-food"     onclick="switchTab('food')">Food</button>
+      <button class="tab"        role="tab" id="tab-progress" onclick="switchTab('progress')">Progress</button>
+      <button class="tab"        role="tab" id="tab-settings" onclick="switchTab('settings')">Settings</button>
+    </div>
+
+    <section class="tab-panel active" id="panel-log" aria-labelledby="tab-log">
+      <div class="date-row">
+        <h2 class="section-heading">Today's Workout</h2>
+        <div class="date-right">
+          <label class="date-label" for="workout-date">Date</label>
+          <input class="date-input" type="date" id="workout-date" />
+        </div>
+      </div>
+      <div id="exercises-container" data-needs-sync></div>
+      <div id="add-exercise-row" data-needs-sync></div>
+      <div class="save-row" data-needs-sync>
+        <button class="btn btn-ghost" onclick="clearForm()">Reset</button>
+        <button class="btn btn-primary" id="save-btn" onclick="saveWorkout()">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+            <polyline points="17 21 17 13 7 13 7 21"/>
+            <polyline points="7 3 7 8 15 8"/>
+          </svg>
+          Save Workout
+        </button>
+      </div>
+
+      <div class="today-weight" data-needs-sync>
+        <h2 class="section-heading">Body Weight</h2>
+        <div class="weight-entry-row">
+          <input class="num-input" type="number" id="weight-input"
+            placeholder="lbs" min="50" max="999" step="0.1" aria-label="Weight in pounds" />
+          <button class="btn btn-primary" onclick="saveWeight()">Log weight</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-panel" id="panel-food" aria-labelledby="tab-food">
+      <div class="date-row">
+        <h2 class="section-heading">Food</h2>
+        <div class="date-right">
+          <label class="date-label" for="food-date">Date</label>
+          <input class="date-input" type="date" id="food-date" />
+        </div>
+      </div>
+
+      <div id="food-totals"></div>
+
+      <div class="food-add" data-needs-sync>
+        <div class="food-search-row">
+          <input class="text-input" type="text" id="food-search" autocomplete="off"
+            placeholder="Search foods…" aria-label="Search the food database" />
+          <select class="select-input" id="food-meal" aria-label="Meal">
+            <option value="Breakfast">Breakfast</option>
+            <option value="Lunch">Lunch</option>
+            <option value="Snack">Snack</option>
+            <option value="Dinner">Dinner</option>
+          </select>
+        </div>
+        <div class="food-results" id="food-results"></div>
+        <button class="btn btn-ghost btn-sm food-import-open" onclick="toggleFoodImport(true)">
+          Paste from Claude
+        </button>
+      </div>
+
+      <div class="food-custom" id="food-custom" data-needs-sync hidden>
+        <div class="food-custom-title">Custom item — not in the database</div>
+        <input class="text-input" type="text" id="cf-name" placeholder="Name (e.g. restaurant chicken bowl)" />
+        <div class="food-custom-grid">
+          <label>Cal<input class="num-input" type="number" id="cf-cal" inputmode="numeric" /></label>
+          <label>P<input class="num-input" type="number" id="cf-p" inputmode="numeric" /></label>
+          <label>C<input class="num-input" type="number" id="cf-c" inputmode="numeric" /></label>
+          <label>Fib<input class="num-input" type="number" id="cf-fib" inputmode="numeric" /></label>
+          <label>Fat<input class="num-input" type="number" id="cf-fat" inputmode="numeric" /></label>
+          <label>Sat<input class="num-input" type="number" id="cf-sat" inputmode="numeric" /></label>
+          <label>Na<input class="num-input" type="number" id="cf-na" inputmode="numeric" /></label>
+          <label>Conf
+            <select class="select-input" id="cf-conf">
+              <option value="high">high</option>
+              <option value="med" selected>med</option>
+              <option value="low">low</option>
+            </select>
+          </label>
+        </div>
+        <div class="field-row">
+          <button class="btn btn-primary btn-sm" onclick="addCustomFood()">Add item</button>
+          <button class="btn btn-ghost btn-sm" onclick="toggleCustomFood(false)">Cancel</button>
+        </div>
+      </div>
+
+      <div class="food-import" id="food-import" data-needs-sync hidden>
+        <div class="food-custom-title">Paste from Claude</div>
+        <p class="fi-help">
+          A <strong>FOOD</strong> block goes to the database (a label was read).
+          An <strong>ITEM</strong> block goes into this day's log (a meal was estimated).
+          Paste the whole reply — anything outside a block is ignored.
+        </p>
+        <textarea class="text-input fi-text" id="fi-text" rows="6" autocomplete="off"
+          spellcheck="false" oninput="onImportInput(this.value)"
+          aria-label="Paste a FOOD or ITEM block"
+          placeholder="FOOD&#10;name: Fizzco Cherry Vanilla&#10;serving: 1 can (355 mL)&#10;cal: 40&#10;…"></textarea>
+        <div class="field-row">
+          <button class="btn btn-primary btn-sm" onclick="reviewImport()">Review</button>
+          <button class="btn btn-ghost btn-sm" onclick="toggleFoodImport(false)">Close</button>
+          <button class="btn btn-ghost btn-sm" onclick="discardImport()">Discard</button>
+        </div>
+        <div id="fi-review"></div>
+      </div>
+
+      <div id="food-items" data-needs-sync></div>
+
+      <div class="save-row" data-needs-sync>
+        <button class="btn btn-ghost" onclick="openCopyDay()">Copy day</button>
+        <button class="btn btn-ghost" onclick="toggleCustomFood(true)">Custom item</button>
+        <button class="btn btn-primary" id="food-save-btn" onclick="saveFoodDay()">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+            <polyline points="17 21 17 13 7 13 7 21"/>
+            <polyline points="7 3 7 8 15 8"/>
+          </svg>
+          Save Day
+        </button>
+      </div>
+    </section>
+
+    <section class="tab-panel" id="panel-progress" aria-labelledby="tab-progress">
+      <div class="panel-header">
+        <h2 class="section-heading">Progress</h2>
+        <div id="streak-area"></div>
+      </div>
+
+      <div id="progress-main"></div>
+
+      <div id="progress-detail" aria-live="polite" hidden></div>
+      <div id="progress-history" aria-live="polite" hidden></div>
+    </section>
+
+    <section class="tab-panel" id="panel-settings" aria-labelledby="tab-settings">
+      <h2 class="section-heading">Settings</h2>
+
+      <div class="settings-group">
+        <div class="settings-group-title">Google Sheets Sync</div>
+        <p class="settings-desc">
+          Paste your Apps Script deployment URL to automatically sync every saved workout to a Google Sheet.
+          Paste the web app URL of your deployed Apps Script.
+        </p>
+        <div class="field-row">
+          <label class="field-label" for="sheets-url">Deployment URL</label>
+          <input class="text-input" type="url" id="sheets-url"
+            placeholder="https://script.google.com/macros/s/…/exec" />
+        </div>
+        <div class="field-row">
+          <label class="field-label" for="sheets-secret">Shared secret <span class="field-optional">(optional)</span></label>
+          <input class="text-input" type="password" id="sheets-secret" autocomplete="off"
+            placeholder="Leave blank unless your script uses a shared secret" />
+        </div>
+        <div class="field-row">
+          <button class="btn btn-primary" onclick="saveSettings()">Save</button>
+          <button class="btn btn-ghost" onclick="testConnection()">Test connection</button>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-group-title">Weight goal</div>
+        <p class="settings-desc">
+          Decides how the weight trend is coloured and what counts as on-pace.
+          A <code>weight_goal</code> row in the sheet's Settings tab overrides this on every device.
+        </p>
+        <div class="field-row">
+          <label class="field-label" for="weight-goal">Direction</label>
+          <select class="select-input" id="weight-goal" onchange="setWeightGoal(this.value)">
+            <option value="gain">Gain (~0.5 lb/week)</option>
+            <option value="maintain">Maintain</option>
+            <option value="lose">Lose</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-group-title">Data</div>
+        <p class="settings-desc">Export all local workout data as a JSON file for backup or migration.</p>
+        <div class="field-row">
+          <button class="btn btn-ghost" onclick="exportData()">Export JSON</button>
+          <button class="btn btn-ghost" onclick="importData()">Import JSON</button>
+          <input type="file" id="import-file" accept=".json" style="display:none" onchange="handleImport(this)" />
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-group-title">Food database</div>
+        <p class="settings-desc">
+          Logged rows store their own values, so history stays a record rather than a view.
+          When a database number was simply <em>wrong</em>, this propagates the fix — it shows
+          what differs and refreshes only what you approve.
+        </p>
+        <p class="settings-desc" id="drift-status">Checking…</p>
+        <div class="field-row">
+          <button class="btn btn-ghost" onclick="openDriftReview()">Review differences</button>
+          <button class="btn btn-ghost" onclick="switchTab('food');toggleFoodImport(true)">Add foods by paste</button>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-group-title">Queue</div>
+        <p class="settings-desc" id="queue-status">Checking queue…</p>
+        <div class="field-row">
+          <button class="btn btn-ghost" onclick="retryQueue()">Retry failed syncs</button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<div class="save-confirm" id="save-confirm" role="status" aria-live="polite">
+  <div class="save-confirm-title">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+      <polyline points="20 6 9 17 4 12"/>
+    </svg>
+    Workout saved
+  </div>
+  <div class="save-confirm-streak" id="save-confirm-streak"></div>
+</div>
+
+<div class="modal-backdrop" id="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+  <div class="modal">
+    <div class="modal-title" id="modal-title"></div>
+    <div class="modal-body"><p id="modal-body-text"></p></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-danger" id="modal-alt-btn" style="display:none"></button>
+      <button class="btn btn-primary" id="modal-confirm-btn">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<script src="scripts/app.js?v=1790453665"></script>
+</body>
+</html>
